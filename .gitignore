@@ -1,1 +1,47 @@
-400: Invalid request
+# Datasets directory
+datasets/
+
+# All CSV files (NCAA data files)
+*.csv
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Local configuration
+.env
+*.ini
+
+# Output files and models
+*.pkl
+*.joblib
+*.h5
+*.model
+
+# Logs
+*.log
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db
