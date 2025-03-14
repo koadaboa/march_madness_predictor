@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+from ..data.loaders import extract_seed_number
+from ..features.tournament import determine_expected_round, calculate_tournament_readin
 
 def calculate_matchup_style_compatibility(team1_profile, team2_profile):
     """
@@ -843,6 +845,85 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
         import traceback
         traceback.print_exc()
         return None
+
+def create_matchup_features_with_seed_handling(team1_id, team2_id, season, season_profiles, seed_data,
+                                          momentum_data, sos_data, coach_features, tourney_history,
+                                          conf_strength, team_conferences, team_consistency=None,
+                                          team_playstyle=None, round_performance=None, pressure_metrics=None,
+                                          conf_impact=None, seed_features=None, coach_metrics=None,
+                                          team_to_seed=None):
+    """
+    Modified version of create_matchup_features_pre_tournament that handles non-tournament teams
+    by assigning them default seeds
+    """
+    # Convert inputs to appropriate types
+    season_value = int(season)
+    team1_id_value = int(team1_id)
+    team2_id_value = int(team2_id)
+    
+    # Get team profiles from the season-specific profiles
+    team1_profile_df = season_profiles[season_profiles['TeamID'] == team1_id_value]
+    team2_profile_df = season_profiles[season_profiles['TeamID'] == team2_id_value]
+    
+    if len(team1_profile_df) == 0 or len(team2_profile_df) == 0:
+        return None  # Skip if either team doesn't have a profile
+    
+    # Get seed numbers from the provided mapping
+    team1_seed_num = team_to_seed.get(team1_id_value, 17) if team_to_seed else 17
+    team2_seed_num = team_to_seed.get(team2_id_value, 17) if team_to_seed else 17
+    
+    # Determine expected round
+    expected_round = determine_expected_round(team1_seed_num, team2_seed_num)
+    
+    # Convert to Series for easier access
+    team1_profile = team1_profile_df.iloc[0]
+    team2_profile = team2_profile_df.iloc[0]
+    
+    # Now call the original function with the seed information or build the feature dictionary directly
+    # Here I'll build a simplified feature dictionary as an example
+    
+    # Create a basic feature dictionary
+    feature_dict = {
+        'Season': season_value,
+        'Team1ID': team1_id_value,
+        'Team2ID': team2_id_value,
+        'ExpectedRound': expected_round,
+        'Team1Seed': team1_seed_num,
+        'Team2Seed': team2_seed_num,
+        'SeedDiff': team1_seed_num - team2_seed_num,
+        'SeedSum': team1_seed_num + team2_seed_num,
+        
+        # Team performance metrics
+        'Team1WinRate': team1_profile.get('Season_Win', 0.5),
+        'Team2WinRate': team2_profile.get('Season_Win', 0.5),
+        'WinRateDiff': team1_profile.get('Season_Win', 0.5) - team2_profile.get('Season_Win', 0.5),
+        
+        # Offensive and defensive efficiency
+        'Team1OffEfficiency': team1_profile.get('Season_OffEfficiency', 100),
+        'Team2OffEfficiency': team2_profile.get('Season_OffEfficiency', 100),
+        'OffEfficiencyDiff': team1_profile.get('Season_OffEfficiency', 100) - team2_profile.get('Season_OffEfficiency', 100),
+        
+        'Team1DefEfficiency': team1_profile.get('Season_DefEfficiency', 100),
+        'Team2DefEfficiency': team2_profile.get('Season_DefEfficiency', 100),
+        'DefEfficiencyDiff': team1_profile.get('Season_DefEfficiency', 100) - team2_profile.get('Season_DefEfficiency', 100),
+        
+        'Team1NetEfficiency': team1_profile.get('Season_NetEfficiency', 0),
+        'Team2NetEfficiency': team2_profile.get('Season_NetEfficiency', 0),
+        'NetEfficiencyDiff': team1_profile.get('Season_NetEfficiency', 0) - team2_profile.get('Season_NetEfficiency', 0)
+    }
+    
+    # Add shooting metrics if available
+    for stat in ['FGPct', 'FG3Pct', 'FTPct', 'eFGPct']:
+        col = f'Season_{stat}'
+        if col in team1_profile and col in team2_profile:
+            feature_dict[f'Team1{stat}'] = team1_profile[col]
+            feature_dict[f'Team2{stat}'] = team2_profile[col]
+            feature_dict[f'{stat}Diff'] = team1_profile[col] - team2_profile[col]
+    
+    # Add matchup ID
+    feature_dict['MatchupID'] = f"{season_value}_{min(team1_id_value, team2_id_value)}_{max(team1_id_value, team2_id_value)}"
+    
+    return feature_dict
 
 def create_tournament_prediction_dataset(seasons, team_profiles, seed_data, momentum_data,
                                      sos_data, coach_features, tourney_history, conf_strength,

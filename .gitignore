@@ -1,5 +1,5 @@
 # Datasets directory
-datasets/
+data/
 
 # All CSV files (NCAA data files)
 *.csv

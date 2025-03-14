@@ -12,7 +12,6 @@ setup(
         "seaborn",
         "xgboost",
         "lightgbm",
-        "catboost",
         "optuna",
         "imbalanced-learn",
     ],

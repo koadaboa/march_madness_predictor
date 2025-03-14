@@ -17,15 +17,18 @@ from march_madness.utils.helpers import prepare_modeling_data, train_and_predict
 
 def main():
     print("Training NCAA Basketball Tournament Prediction Models")
+    # Define the data directory
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(project_root, 'data')
     
     # Load training data
     mens_train_data = filter_data_dict_by_seasons(
-        load_mens_data(STARTING_SEASON), 
+        load_mens_data(STARTING_SEASON, data_dir = data_dir), 
         TRAINING_SEASONS + [VALIDATION_SEASON]
     )
     
     womens_train_data = filter_data_dict_by_seasons(
-        load_womens_data(STARTING_SEASON), 
+        load_womens_data(STARTING_SEASON, data_dir = data_dir), 
         TRAINING_SEASONS + [VALIDATION_SEASON]
     )
     

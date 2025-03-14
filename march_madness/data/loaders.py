@@ -32,12 +32,13 @@ def extract_seed_number(seed_str):
         return int(seed_str[1:3])
     return None
 
-def load_mens_data(starting_season=2015):
+def load_mens_data(starting_season=2015, data_dir=None):
     """
     Load only men's NCAA basketball datasets filtered by starting season
 
     Args:
         starting_season (int): The starting season to include (default: 2015)
+        data_dir (str): Directory containing data files (default: None)
 
     Returns:
         dict: A dictionary containing the loaded dataframes with standardized keys
@@ -45,6 +46,12 @@ def load_mens_data(starting_season=2015):
     import os
     import pandas as pd
 
+    # Set default data directory if none provided
+    if data_dir is None:
+        # Try to find the data directory relative to the project root
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        data_dir = os.path.join(project_root, 'data')
+    
     # List of men's filenames to load
     mens_files = [
         'MNCAATourneyDetailedResults.csv',
@@ -63,23 +70,24 @@ def load_mens_data(starting_season=2015):
 
     # Load each file
     for file in mens_files:
-        if os.path.exists(file):
+        file_path = os.path.join(data_dir, file)
+        if os.path.exists(file_path):
             try:
-                df = pd.read_csv(file, encoding='cp1252')
+                df = pd.read_csv(file_path, encoding='cp1252')
                 df = filter_time(df, starting_season)
 
                 # Standardize the variable name
                 var_name = ("df_" + file.replace('M', '')
-                                     .replace('NCAAT', 't')
-                                     .replace('.csv', '')
-                                     .replace('CSV', '')
-                                     .lower())
+                                    .replace('NCAAT', 't')
+                                    .replace('.csv', '')
+                                    .replace('CSV', '')
+                                    .lower())
                 data_dict[var_name] = df
                 print(f"Loaded {file}: {len(df)} rows")
             except Exception as e:
                 print(f"Error loading {file}: {e}")
         else:
-            print(f"File not found: {file}")
+            print(f"File not found: {file_path}")
 
     # Create alias names for pipeline compatibility
     alias_mapping = {
@@ -108,18 +116,23 @@ def load_mens_data(starting_season=2015):
     print(f"Successfully loaded {len(data_dict)} men's datasets from season {starting_season} onwards.")
     return data_dict
 
-def load_womens_data(starting_season=2015):
+def load_womens_data(starting_season=2015, data_dir=None):
     """
     Load only women's NCAA basketball datasets filtered by starting season
 
     Args:
         starting_season (int): The starting season to include (default: 2015)
+        data_dir (str): Directory containing data files (default: None)
 
     Returns:
         dict: A dictionary containing the loaded dataframes with standardized keys
     """
-    import os
-    import pandas as pd
+
+    # Set default data directory if none provided
+    if data_dir is None:
+        # Try to find the data directory relative to the project root
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        data_dir = os.path.join(project_root, 'data')
 
     # List of women's filenames to load
     womens_files = [
@@ -137,9 +150,10 @@ def load_womens_data(starting_season=2015):
 
     # Load each file
     for file in womens_files:
-        if os.path.exists(file):
+        file_path = os.path.join(data_dir, file)
+        if os.path.exists(file_path):
             try:
-                df = pd.read_csv(file, encoding='cp1252')
+                df = pd.read_csv(file_path, encoding='cp1252')
                 df = filter_time(df, starting_season)
 
                 # Standardize the variable name

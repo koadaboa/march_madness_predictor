@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from march_madness.config import PREDICTION_SEASONS
 
 def calculate_tournament_history(tourney_df, current_season=None):
     """
