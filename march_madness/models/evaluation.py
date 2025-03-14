@@ -2,124 +2,121 @@
 import pandas as pd
 import numpy as np
 from sklearn.calibration import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, roc_auc_score, log_loss
 from ..features.matchup import create_tournament_prediction_dataset
-from ..features.tournament import determine_expected_round
 from ..models.training import create_feature_interactions
 
+
 def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff'):
-    """
-    Calibrate model predictions by expected tournament round based on seed matchups
-
-    Args:
-        predictions: Model predictions to calibrate
-        X_test: Test features
-        seed_diff_col: Column name for seed difference
-
-    Returns:
-        Calibrated predictions
-    """
-    # Initialize with original predictions
     calibrated_preds = np.copy(predictions)
-
-    # Get seed differences
-    if isinstance(X_test, pd.DataFrame):
-        seed_diffs = X_test[seed_diff_col].values
-        team1_seeds = X_test['Team1Seed'].values if 'Team1Seed' in X_test.columns else None
-        team2_seeds = X_test['Team2Seed'].values if 'Team2Seed' in X_test.columns else None
-    else:
-        # Assume it's the index of the seed difference column
-        seed_diffs = X_test[:, seed_diff_col]
-        team1_seeds = None
-        team2_seeds = None
-
-    # Assign expected rounds if we have seed information
-    if team1_seeds is not None and team2_seeds is not None:
-        expected_rounds = [determine_expected_round(s1, s2) for s1, s2 in zip(team1_seeds, team2_seeds)]
-    else:
-        # If we don't have seed info, just use seed differences
-        expected_rounds = ['Unknown'] * len(seed_diffs)
-
-    seed_groups = [
-        ('heavy_favorite', lambda x: x <= -8),
-        ('favorite', lambda x: (x > -8) & (x <= -4)),
-        ('slight_favorite', lambda x: (x > -4) & (x <= -1)),
-        ('even', lambda x: (x > -1) & (x < 1)),
-        ('slight_underdog', lambda x: (x >= 1) & (x < 4)),
-        ('underdog', lambda x: (x >= 4) & (x < 8)),
-        ('heavy_underdog', lambda x: x >= 8)
-    ]
-
-    # Calibrate by expected round and seed group
-    for round_name in set(expected_rounds):
-        if round_name == 'Unknown':
-            continue
-
-        round_mask = np.array(expected_rounds) == round_name
-
-        # For each seed group in this expected round
-        for group_name, group_filter in seed_groups:
-            group_mask = round_mask & group_filter(seed_diffs)
-
-            # If not enough samples in this group, skip
-            if sum(group_mask) < 10:
-                continue
-
-            # Get predictions for this group
-            group_preds = predictions[group_mask]
-
-            # If we have true values, we can fit a calibrator
-            if 'Target' in X_test.columns and not X_test['Target'].isna().any():
-                group_targets = X_test.loc[group_mask, 'Target'].values
-
-                # Train isotonic calibration
-                calibrator = IsotonicRegression(out_of_bounds='clip')
-                calibrator.fit(group_preds, group_targets)
-
-                # Apply calibration
-                calibrated_preds[group_mask] = calibrator.transform(group_preds)
+    seed_diffs = X_test[seed_diff_col].values if isinstance(X_test, pd.DataFrame) else X_test[:, seed_diff_col]
+    
+    # Get team seed information if available
+    team1_seeds = X_test['Team1Seed'].values if 'Team1Seed' in X_test.columns else None
+    team2_seeds = X_test['Team2Seed'].values if 'Team2Seed' in X_test.columns else None
+    
+    # Use both seed differences and win rate differences for calibration
+    win_rate_diffs = X_test['WinRateDiff'].values if 'WinRateDiff' in X_test.columns else None
+    
+    # Create segments based on both seed and win rate differences
+    segments = []
+    for i in range(len(predictions)):
+        seed_diff = seed_diffs[i]
+        win_rate_diff = win_rate_diffs[i] if win_rate_diffs is not None else 0
+        
+        # Determine segment - more fine-grained than before
+        if seed_diff <= -10:  # Heavy favorite by seed
+            segment = 'heavy_favorite_seed'
+        elif seed_diff <= -5:
+            segment = 'favorite_seed'
+        elif seed_diff <= -1:
+            segment = 'slight_favorite_seed'
+        elif seed_diff < 1:
+            segment = 'even_seed'
+        elif seed_diff < 5:
+            segment = 'slight_underdog_seed'
+        elif seed_diff < 10:
+            segment = 'underdog_seed'
+        else:
+            segment = 'heavy_underdog_seed'
+            
+        # Add win rate dimension
+        if win_rate_diff >= 0.2:
+            segment += '_strong_form'
+        elif win_rate_diff >= 0.1:
+            segment += '_good_form'
+        elif win_rate_diff <= -0.2:
+            segment += '_weak_form'
+        elif win_rate_diff <= -0.1:
+            segment += '_poor_form'
+        else:
+            segment += '_neutral_form'
+            
+        segments.append(segment)
+    
+    # Apply calibration based on segments
+    segment_calibrators = {}
+    
+    # If we have target values, train segment-specific calibrators
+    if 'Target' in X_test.columns and not X_test['Target'].isna().any():
+        targets = X_test['Target'].values
+        unique_segments = set(segments)
+        
+        for segment in unique_segments:
+            mask = np.array(segments) == segment
+            if np.sum(mask) >= 10:  # Need enough samples
+                segment_probs = predictions[mask]
+                segment_targets = targets[mask]
+                
+                # Try logistic regression calibration first
+                try:
+                    lr_calibrator = LogisticRegression(C=1.0, solver='liblinear')
+                    lr_calibrator.fit(segment_probs.reshape(-1, 1), segment_targets)
+                    segment_calibrators[segment] = ('lr', lr_calibrator)
+                except:
+                    # Fall back to isotonic if logistic fails
+                    try:
+                        iso_calibrator = IsotonicRegression(out_of_bounds='clip')
+                        iso_calibrator.fit(segment_probs, segment_targets)
+                        segment_calibrators[segment] = ('iso', iso_calibrator)
+                    except:
+                        pass
+    
+    # Apply calibration to each prediction
+    for i in range(len(predictions)):
+        segment = segments[i]
+        if segment in segment_calibrators:
+            calib_type, calibrator = segment_calibrators[segment]
+            if calib_type == 'lr':
+                calibrated_preds[i] = calibrator.predict_proba(np.array([[predictions[i]]]))[0, 1]
             else:
-                # Apply pre-defined calibration based on historical patterns
-                if round_name == 'Round64':
-                    if group_name == 'heavy_favorite':
-                        # 1 vs 16, 2 vs 15 matchups - boost higher seeds
-                        calibrated_preds[group_mask] = 0.95 * group_preds + 0.05
-                    elif group_name == 'favorite':
-                        # 3 vs 14, 4 vs 13 matchups
-                        calibrated_preds[group_mask] = 0.9 * group_preds + 0.05
-                    elif group_name == 'slight_favorite':
-                        # 5 vs 12, 6 vs 11 matchups - more upset prone
-                        calibrated_preds[group_mask] = 0.85 * group_preds + 0.05
-                    elif group_name == 'even':
-                        # 7 vs 10, 8 vs 9 matchups - very even
-                        calibrated_preds[group_mask] = 0.7 * group_preds + 0.15
-
-                elif round_name == 'Round32':
-                    if group_name == 'heavy_favorite':
-                        # Still favor higher seeds but less dramatically
-                        calibrated_preds[group_mask] = 0.9 * group_preds + 0.05
-                    elif group_name in ['favorite', 'slight_favorite']:
-                        # More competitive matchups
-                        calibrated_preds[group_mask] = 0.85 * group_preds + 0.05
-                    elif group_name == 'even':
-                        # Very competitive
-                        calibrated_preds[group_mask] = 0.7 * group_preds + 0.15
-
-                elif round_name in ['Sweet16', 'Elite8']:
-                    # Later rounds are more competitive and skill-based
-                    if group_name in ['heavy_favorite', 'favorite']:
-                        calibrated_preds[group_mask] = 0.85 * group_preds + 0.05
-                    else:
-                        # Closer matchups
-                        calibrated_preds[group_mask] = 0.8 * group_preds + 0.1
-
-                elif round_name in ['Final4', 'Championship']:
-                    # Final rounds are very competitive regardless of seed
-                    calibrated_preds[group_mask] = 0.7 * group_preds + 0.15
-
+                calibrated_preds[i] = calibrator.transform([predictions[i]])[0]
+        else:
+            # Apply default calibration based on segment
+            raw_pred = predictions[i]
+            if 'heavy_favorite' in segment:
+                if 'strong_form' in segment:
+                    calibrated_preds[i] = min(0.98, raw_pred * 1.05)
+                else:
+                    calibrated_preds[i] = min(0.95, raw_pred * 1.03)
+            elif 'favorite' in segment:
+                calibrated_preds[i] = min(0.92, raw_pred * 1.02)
+            elif 'slight_favorite' in segment:
+                calibrated_preds[i] = min(0.85, raw_pred * 1.01)
+            elif 'even' in segment:
+                # Keep closer to 0.5 for even matchups
+                calibrated_preds[i] = raw_pred * 0.95 + 0.025
+            elif 'slight_underdog' in segment:
+                calibrated_preds[i] = max(0.15, raw_pred * 0.98)
+            elif 'underdog' in segment:
+                calibrated_preds[i] = max(0.08, raw_pred * 0.97)
+            else:  # heavy underdog
+                calibrated_preds[i] = max(0.02, raw_pred * 0.95)
+    
     # Ensure all predictions are valid probabilities
     calibrated_preds = np.clip(calibrated_preds, 0.001, 0.999)
-
+    
     return calibrated_preds
 
 def validate_model(model, validation_data, feature_cols, scaler, dropped_features, gender, validation_season):
@@ -328,6 +325,121 @@ def evaluate_predictions_against_actual(predictions_df, actual_results_df, gende
             'log_loss': log_loss_score,
             'matched_games': len(results_df),
             'accuracy_by_season': accuracy_by_season.to_dict(),
+            'results_df': results_df
+        }
+    else:
+        print(f"No matching predictions found for {gender} tournaments")
+        return None
+
+        # Add to march_madness/models/evaluation.py
+def evaluate_predictions_by_tournament_round(predictions_df, actual_results_df, seed_data, gender="men's"):
+    """
+    Evaluate prediction accuracy by tournament round
+    """
+    # Create a copy of the actual results for processing
+    actual_games = actual_results_df.copy()
+    
+    # Merge with seed data
+    actual_games = actual_games.merge(
+        seed_data.rename(columns={'TeamID': 'WTeamID', 'Seed': 'WSeed'}),
+        on=['Season', 'WTeamID'],
+        how='left'
+    )
+    
+    actual_games = actual_games.merge(
+        seed_data.rename(columns={'TeamID': 'LTeamID', 'Seed': 'LSeed'}),
+        on=['Season', 'LTeamID'],
+        how='left'
+    )
+    
+    # Create a unique ID for each matchup in the actual results
+    actual_games['MatchupID'] = actual_games.apply(
+        lambda row: f"{row['Season']}_{min(row['WTeamID'], row['LTeamID'])}_{max(row['WTeamID'], row['LTeamID'])}",
+        axis=1
+    )
+    
+    # Determine the round for each game
+    round_mapping = {
+        134: 'Round64', 135: 'Round64', 136: 'Round64', 137: 'Round64',
+        138: 'Round32', 139: 'Round32',
+        140: 'Sweet16', 141: 'Sweet16',
+        142: 'Elite8', 143: 'Elite8',
+        144: 'Final4',
+        146: 'Championship'
+    }
+    
+    actual_games['Round'] = actual_games['DayNum'].map(round_mapping)
+    
+    # Match predictions with actual games and track by round
+    matched_predictions = []
+    
+    for _, game in actual_games.iterrows():
+        season = game['Season']
+        matchup_id = game['MatchupID']
+        
+        # Find this matchup in our predictions
+        prediction = predictions_df[predictions_df['MatchupID'] == matchup_id]
+        
+        if len(prediction) > 0:
+            # Get the prediction row
+            pred_row = prediction.iloc[0]
+            
+            # Determine if team1 was the winner
+            team1_id = pred_row['Team1ID']
+            team2_id = pred_row['Team2ID']
+            team1_won = (game['WTeamID'] == team1_id)
+            
+            # Get the predicted probability
+            predicted_prob = pred_row['Pred'] if team1_won else (1 - pred_row['Pred'])
+            
+            matched_predictions.append({
+                'Season': season,
+                'MatchupID': matchup_id,
+                'Round': game['Round'],
+                'WTeamID': game['WTeamID'],
+                'LTeamID': game['LTeamID'],
+                'WSeed': game['WSeed'],
+                'LSeed': game['LSeed'],
+                'PredictedProb': predicted_prob,
+                'Correct': (predicted_prob > 0.5),
+                'Confidence': abs(predicted_prob - 0.5) * 2  # Scale 0-1, where 1 is highest confidence
+            })
+    
+    # Convert to DataFrame and analyze by round
+    if matched_predictions:
+        results_df = pd.DataFrame(matched_predictions)
+        
+        # Calculate Brier score and accuracy by round
+        round_metrics = results_df.groupby('Round').apply(lambda x: pd.Series({
+            'Count': len(x),
+            'Accuracy': x['Correct'].mean(),
+            'Brier': brier_score_loss(x['Correct'].astype(int), x['PredictedProb']),
+            'LogLoss': log_loss(x['Correct'].astype(int), x['PredictedProb']),
+            'AvgConfidence': x['Confidence'].mean()
+        })).reset_index()
+        
+        print(f"\n===== {gender.capitalize()} Tournament Prediction Evaluation by Round =====")
+        print(f"Matched {len(results_df)} games from actual tournament results")
+        print("\nMetrics by Round:")
+        print(round_metrics.to_string(index=False))
+        
+        # Analyze upset metrics
+        results_df['WSeedNum'] = results_df['WSeed'].apply(lambda x: int(x[1:3]) if isinstance(x, str) and len(x) >= 3 else 0)
+        results_df['LSeedNum'] = results_df['LSeed'].apply(lambda x: int(x[1:3]) if isinstance(x, str) and len(x) >= 3 else 0) 
+        results_df['Upset'] = results_df['WSeedNum'] > results_df['LSeedNum']
+        
+        # Accuracy on upsets vs. non-upsets
+        upset_games = results_df[results_df['Upset']]
+        non_upset_games = results_df[~results_df['Upset']]
+        
+        print("\nUpset Detection:")
+        print(f"  Total Upsets: {len(upset_games)} ({len(upset_games)/len(results_df)*100:.1f}%)")
+        if len(upset_games) > 0:
+            print(f"  Accuracy on Upsets: {upset_games['Correct'].mean():.4f}")
+        print(f"  Accuracy on Non-Upsets: {non_upset_games['Correct'].mean():.4f}")
+        
+        return {
+            'round_metrics': round_metrics,
             'results_df': results_df
         }
     else:

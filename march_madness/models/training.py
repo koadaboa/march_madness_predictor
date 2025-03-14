@@ -195,6 +195,24 @@ def create_feature_interactions(X, important_features=None, max_degree=2):
     if all(f in X.columns for f in ['TourneyAppearancesDiff', 'SeedDiff']):
         X_enhanced['SeedDiff_x_ExperienceDiff'] = X['SeedDiff'] * X['TourneyAppearancesDiff']
 
+    # Tournament readiness interaction with seed
+    if all(f in X.columns for f in ['Team1TournamentReadiness', 'Team2TournamentReadiness', 'SeedDiff']):
+        X_enhanced['TournamentReadiness_x_SeedDiff'] = (X['Team1TournamentReadiness'] - X['Team2TournamentReadiness']) * X['SeedDiff']
+    
+    # Conference strength interactions
+    if all(f in X.columns for f in ['Team1ConfWinRate', 'Team2ConfWinRate', 'SeedDiff']):
+        X_enhanced['ConfStrength_x_SeedDiff'] = (X['Team1ConfWinRate'] - X['Team2ConfWinRate']) * X['SeedDiff']
+    
+    # Momentum and consistency features
+    if all(f in X.columns for f in ['Team1WinRate_Last5', 'Team2WinRate_Last5', 'Team1ScoreConsistency', 'Team2ScoreConsistency']):
+        X_enhanced['RecentForm_x_Consistency'] = (X['Team1WinRate_Last5'] - X['Team2WinRate_Last5']) / \
+                                               (X['Team1ScoreConsistency'] + X['Team2ScoreConsistency'] + 0.01)
+    
+    # Coach experience weighted by tournament pressures
+    if all(f in X.columns for f in ['Team1CoachTourneyExp', 'Team2CoachTourneyExp', 'Team1PressureScore', 'Team2PressureScore']):
+        X_enhanced['CoachExp_x_Pressure'] = (X['Team1CoachTourneyExp'] * X['Team1PressureScore'] - 
+                                           X['Team2CoachTourneyExp'] * X['Team2PressureScore'])
+
     # Handle potential division by zero issues
     for col in X_enhanced.columns:
         if col not in X.columns:  # Only process new columns
@@ -275,66 +293,68 @@ def handle_class_imbalance(X_train, y_train, method='combined', random_state=42)
 
     return X_resampled, y_resampled
 
+# Modify train_ensemble_model in models/training.py
 def train_ensemble_model(X_train, y_train, random_state=42):
-    """
-    Train an ensemble model for tournament predictions
-
-    Args:
-        X_train: Training features
-        y_train: Training targets
-        random_state: Random state for reproducibility
-
-    Returns:
-        Trained ensemble model
-    """
-    # Train XGBoost model
+    # XGBoost model - tune for higher precision
     xgb_model = XGBClassifier(
-        n_estimators=500,
-        learning_rate=0.05,
-        max_depth=5,
+        n_estimators=800,
+        learning_rate=0.03,
+        max_depth=4,
         subsample=0.8,
-        colsample_bytree=0.8,
-        gamma=0.1,
-        reg_alpha=0.1,
-        reg_lambda=1,
+        colsample_bytree=0.7,
+        gamma=0.2,
+        reg_alpha=0.2,
+        reg_lambda=1.5,
         min_child_weight=3,
+        scale_pos_weight=1.0,
         random_state=random_state
     )
 
-    # Train LightGBM model
+    # LightGBM model - tune for higher recall
     lgb_model = LGBMClassifier(
-        n_estimators=500,
-        learning_rate=0.05,
-        max_depth=7,
-        num_leaves=31,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        reg_alpha=0.1,
-        reg_lambda=1,
+        n_estimators=800,
+        learning_rate=0.03,
+        max_depth=5,
+        num_leaves=24,
+        subsample=0.7,
+        colsample_bytree=0.7,
+        reg_alpha=0.2,
+        reg_lambda=1.5,
         min_child_samples=20,
+        class_weight='balanced',
         random_state=random_state
     )
 
-    # Train Random Forest model
+    # Random Forest model
     rf_model = RandomForestClassifier(
-        n_estimators=300,
-        max_depth=15,
-        min_samples_split=5,
-        min_samples_leaf=2,
+        n_estimators=500,
+        max_depth=12,
+        min_samples_split=6,
+        min_samples_leaf=3,
         max_features='sqrt',
+        class_weight='balanced',
         random_state=random_state,
         n_jobs=-1
     )
+    
+    # Add a Logistic Regression model for better calibration
+    logistic_model = LogisticRegression(
+        C=0.8,
+        class_weight='balanced',
+        solver='liblinear',
+        random_state=random_state
+    )
 
-    # Create a voting classifier
+    # Create a more diverse ensemble with optimized weights
     ensemble = VotingClassifier(
         estimators=[
             ('xgb', xgb_model),
             ('lgb', lgb_model),
-            ('rf', rf_model)
+            ('rf', rf_model),
+            ('lr', logistic_model)
         ],
         voting='soft',
-        weights=[0.4, 0.4, 0.2]
+        weights=[0.4, 0.3, 0.2, 0.1]  # Give more weight to XGBoost and LightGBM
     )
 
     # Fit the ensemble

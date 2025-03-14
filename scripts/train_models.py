@@ -5,6 +5,8 @@ import pandas as pd
 import numpy as np
 import pickle
 import sys
+import sklearn
+from sklearn.inspection import permutation_importance
 
 # Add the package to path if needed
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -55,6 +57,38 @@ def main():
     womens_model, womens_feature_cols, womens_scaler, womens_dropped_features = train_and_predict_model(
         womens_modeling_data, "women's", TRAINING_SEASONS, VALIDATION_SEASON, []
     )
+
+    # Get feature importance from the ensemble components
+    feature_importances = {}
+
+    # For XGBoost
+    if hasattr(mens_model.named_estimators_['xgb'], 'feature_importances_'):
+        xgb_importances = mens_model.named_estimators_['xgb'].feature_importances_
+        xgb_features = {name: importance for name, importance in zip(mens_feature_cols, xgb_importances)}
+        feature_importances['xgb'] = dict(sorted(xgb_features.items(), key=lambda x: x[1], reverse=True)[:30])
+
+    # For LightGBM
+    if hasattr(mens_model.named_estimators_['lgb'], 'feature_importances_'):
+        lgb_importances = mens_model.named_estimators_['lgb'].feature_importances_
+        lgb_features = {name: importance for name, importance in zip(mens_feature_cols, lgb_importances)}
+        feature_importances['lgb'] = dict(sorted(lgb_features.items(), key=lambda x: x[1], reverse=True)[:30])
+
+    # For Random Forest
+    if hasattr(mens_model.named_estimators_['rf'], 'feature_importances_'):
+        rf_importances = mens_model.named_estimators_['rf'].feature_importances_
+        rf_features = {name: importance for name, importance in zip(mens_feature_cols, rf_importances)}
+        feature_importances['rf'] = dict(sorted(rf_features.items(), key=lambda x: x[1], reverse=True)[:30])
+
+    # Save feature importances
+    with open('models/feature_importances.pkl', 'wb') as f:
+        pickle.dump(feature_importances, f)
+
+    print("Top 10 features by importance:")
+    for model_name, importances in feature_importances.items():
+        top_10 = list(importances.items())[:10]
+        print(f"\n{model_name.upper()} Model:")
+        for feature, importance in top_10:
+            print(f"  {feature}: {importance:.4f}")
     
     # Save models and related objects
     os.makedirs('models', exist_ok=True)
