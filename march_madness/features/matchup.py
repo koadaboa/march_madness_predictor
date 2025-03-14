@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from ..data.loaders import extract_seed_number
-from ..features.tournament import determine_expected_round, calculate_tournament_readin
+from ..features.tournament import determine_expected_round, calculate_tournament_readiness
 
 def calculate_matchup_style_compatibility(team1_profile, team2_profile):
     """
@@ -130,7 +130,7 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
                                         momentum_data, sos_data, coach_features, tourney_history,
                                         conf_strength, team_conferences, team_consistency=None,
                                         team_playstyle=None, round_performance=None, pressure_metrics=None,
-                                        conf_impact=None, seed_features=None, coach_metrics=None):
+                                        conf_impact=None, seed_features=None, coach_metrics=None, team_to_seed=None):
     """
     Create features for tournament matchups before the tournament starts
 
@@ -867,6 +867,10 @@ def create_matchup_features_with_seed_handling(team1_id, team2_id, season, seaso
     
     if len(team1_profile_df) == 0 or len(team2_profile_df) == 0:
         return None  # Skip if either team doesn't have a profile
+
+    # In create_matchup_features_pre_tournament 
+    # Initialize team_to_seed as an empty dict if not provided
+    team_to_seed = {} if team_to_seed is None else team_to_seed
     
     # Get seed numbers from the provided mapping
     team1_seed_num = team_to_seed.get(team1_id_value, 17) if team_to_seed else 17

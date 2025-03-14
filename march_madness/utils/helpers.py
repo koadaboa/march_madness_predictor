@@ -9,7 +9,8 @@ calculate_expected_round_features, create_seed_trend_features, calculate_confere
 calculate_coach_tournament_metrics)
 from ..features.matchup import (create_seed_based_features, create_seed_based_pressure_metrics, 
 create_seed_based_trend_features, calculate_seed_based_probability, create_tournament_prediction_dataset)
-from ..models.training import create_feature_interactions, handle_class_imbalance, drop_redundant_features
+from ..models.training import (create_feature_interactions, handle_class_imbalance, 
+drop_redundant_features, train_ensemble_model)
 from ..models.evaluation import calibrate_by_expected_round
 from ..models.prediction import run_tournament_simulation_pre_tournament
 import warnings
