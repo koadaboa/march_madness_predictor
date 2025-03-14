@@ -14,7 +14,7 @@ from ..models.training import (create_feature_interactions, handle_class_imbalan
 drop_redundant_features, train_ensemble_model)
 from ..models.evaluation import calibrate_by_expected_round
 from ..models.prediction import run_tournament_simulation_pre_tournament
-from ..utils.data_access import optimize_feature_dataframes
+from ..utils.data_access import optimize_feature_dataframes, get_data_with_index
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -45,7 +45,7 @@ def prepare_modeling_data(data_dict, gender, starting_season, current_season, se
             seasons = []
         print(f"DEBUG: {gender} tourney data contains seasons:", seasons)
         for season in seasons_to_process:
-            games = data_dict['df_tourney'][data_dict['df_tourney']['Season'] == season]
+            games = get_data_with_index(data_dict['df_tourney'], 'Season', season, indexed_suffix='_by_season')
             if len(games) > 0:
                 print(f"WARNING: Input data contains {len(games)} actual tournament results for season {season}")
     else:
@@ -60,7 +60,6 @@ def prepare_modeling_data(data_dict, gender, starting_season, current_season, se
     df_tourney_slots = data_dict.get('df_tourney_slots', pd.DataFrame())
     df_conf_tourney = data_dict.get('df_conf_tourney', pd.DataFrame())
     df_coaches = data_dict.get('df_coaches', pd.DataFrame())
-    df_seed_round_slots = data_dict.get('df_seed_round_slots', pd.DataFrame())
 
     # Create MatchupID for tournament data if not already present
     if 'MatchupID' not in df_tourney.columns and not df_tourney.empty:
@@ -72,7 +71,8 @@ def prepare_modeling_data(data_dict, gender, starting_season, current_season, se
     # Determine tournament days by season to avoid data leakage
     tournament_days = {}
     for season in df_tourney['Season'].unique():
-        tournament_days[season] = df_tourney[df_tourney['Season'] == season]['DayNum'].unique()
+        season_tourney = get_data_with_index(df_tourney, 'Season', season, indexed_suffix='_by_season')
+        tournament_days[season] = season_tourney['DayNum'].unique()
 
     # SAFEGUARD: Apply data leakage prevention before using tournament data
     def apply_data_leakage_safeguard(data_df, season_col='Season', current_season=None):
@@ -229,11 +229,11 @@ def prepare_modeling_data(data_dict, gender, starting_season, current_season, se
         print(f"Creating prediction dataset for season {season}")
 
         # Get ALL teams for this season from team profiles
-        season_team_profiles = enhanced_team_profiles[enhanced_team_profiles['Season'] == season]
+        season_team_profiles = get_data_with_index(enhanced_team_profiles, 'Season', season, indexed_suffix='_by_season')
         all_teams = season_team_profiles['TeamID'].unique()
         
         # Get tournament teams
-        season_seed_data = df_seed[df_seed['Season'] == season]
+        season_seed_data = get_data_with_index(df_seed, 'Season', season, indexed_suffix='_by_season')
         
         # For seasons without existing tournament features, create them for all teams
         if len(round_performance[round_performance['Season'] == season]) == 0:

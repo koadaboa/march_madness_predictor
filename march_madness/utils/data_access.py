@@ -22,7 +22,6 @@ def get_data_with_index(data, key_or_column=None, value=None, indexed_suffix='_b
     """
     # Handle the call pattern: get_data_with_index(dataframe, season)
     if isinstance(data, pd.DataFrame) and key_or_column is not None and value is None:
-        # Assume we're filtering by 'Season'
         value = key_or_column
         key_or_column = 'Season'
 
@@ -39,7 +38,27 @@ def get_data_with_index(data, key_or_column=None, value=None, indexed_suffix='_b
         # Fall back to filtering
         if fallback_filter:
             try:
-                return data[data[key_or_column] == value]
+                # Handle tuple keys for filtering
+                if isinstance(key_or_column, tuple) and isinstance(value, tuple):
+                    # Make sure tuples have the same length
+                    if len(key_or_column) != len(value):
+                        print(f"Error: Tuples must have same length: {key_or_column}, {value}")
+                        return pd.DataFrame()
+                    
+                    # Create a combined filter
+                    filter_mask = pd.Series(True, index=data.index)
+                    for k, v in zip(key_or_column, value):
+                        if callable(v):
+                            # For lambda functions
+                            filter_mask = filter_mask & data[k].apply(v)
+                        else:
+                            # For direct value comparison
+                            filter_mask = filter_mask & (data[k] == v)
+                    
+                    return data[filter_mask]
+                else:
+                    # Standard single-column filtering
+                    return data[data[key_or_column] == value]
             except Exception as e:
                 print(f"Error filtering DataFrame: {str(e)}")
                 return pd.DataFrame()

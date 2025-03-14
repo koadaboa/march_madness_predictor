@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from ..data.loaders import extract_seed_number
 from ..features.tournament import determine_expected_round, calculate_tournament_readiness
+from ..utils.data_access import get_data_with_index
 
 def calculate_matchup_style_compatibility(team1_profile, team2_profile):
     """
@@ -340,10 +341,10 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
             team1_consistency = get_data_with_index(team_consistency, (season_value, team1_id_value), indexed_suffix='_by_team')
             team2_consistency = get_data_with_index(team_consistency, (season_value, team2_id_value), indexed_suffix='_by_team')
 
-            if len(team1_consist) > 0:
-                for col in team1_consist.columns:
+            if len(team1_consistency) > 0:
+                for col in team1_consistency.columns:
                     if col not in ['Season', 'TeamID']:
-                        team1_consistency[col] = team1_consist[col].values[0]
+                        team1_consistency[col] = team1_consistency[col].values[0]
             else:
                 # Default values
                 team1_consistency = {
@@ -354,10 +355,10 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
                     'ScoreMargin_std': 5
                 }
 
-            if len(team2_consist) > 0:
-                for col in team2_consist.columns:
+            if len(team2_consistency) > 0:
+                for col in team2_consistency.columns:
                     if col not in ['Season', 'TeamID']:
-                        team2_consistency[col] = team2_consist[col].values[0]
+                        team2_consistency[col] = team2_consistency[col].values[0]
             else:
                 # Default values
                 team2_consistency = {
@@ -532,13 +533,13 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
                     team1_coach_tourney = {
                         'PriorTourneyWinRate': team1_coach['PriorTourneyWinRate'].values[0],
                         'UpsetRate': team1_coach['UpsetRate'].values[0],
-                        'UpsetDefenseRate': team1_coach_m['UpsetDefenseRate'].values[0]
+                        'UpsetDefenseRate': team1_coach_metrics['UpsetDefenseRate'].values[0]
                     }
 
                     # Add round-specific performance if available
                     round_col = f"{expected_round}_WinRate"
-                    if round_col in team1_coach_m.columns:
-                        team1_coach_tourney['RoundWinRate'] = team1_coach_m[round_col].values[0]
+                    if round_col in team1_coach_metrics.columns:
+                        team1_coach_tourney['RoundWinRate'] = team1_coach_metrics[round_col].values[0]
                     else:
                         team1_coach_tourney['RoundWinRate'] = 0.5
                 else:
@@ -549,17 +550,17 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
                         'RoundWinRate': 0.5
                     }
 
-                if len(team2_coach_m) > 0:
+                if len(team2_coach) > 0:
                     team2_coach_tourney = {
-                        'PriorTourneyWinRate': team2_coach_m['PriorTourneyWinRate'].values[0],
-                        'UpsetRate': team2_coach_m['UpsetRate'].values[0],
-                        'UpsetDefenseRate': team2_coach_m['UpsetDefenseRate'].values[0]
+                        'PriorTourneyWinRate': team2_coach['PriorTourneyWinRate'].values[0],
+                        'UpsetRate': team2_coach['UpsetRate'].values[0],
+                        'UpsetDefenseRate': team2_coach['UpsetDefenseRate'].values[0]
                     }
 
                     # Add round-specific performance if available
                     round_col = f"{expected_round}_WinRate"
-                    if round_col in team2_coach_m.columns:
-                        team2_coach_tourney['RoundWinRate'] = team2_coach_m[round_col].values[0]
+                    if round_col in team2_coach.columns:
+                        team2_coach_tourney['RoundWinRate'] = team2_coach[round_col].values[0]
                     else:
                         team2_coach_tourney['RoundWinRate'] = 0.5
                 else:
@@ -825,8 +826,8 @@ def create_matchup_features_with_seed_handling(team1_id, team2_id, season, seaso
     team2_id_value = int(team2_id)
     
     # Get team profiles from the season-specific profiles
-    team1_profile_df = season_profiles[season_profiles['TeamID'] == team1_id_value]
-    team2_profile_df = season_profiles[season_profiles['TeamID'] == team2_id_value]
+    team1_profile_df = get_data_with_index(season_profiles, 'TeamID', team1_id_value)
+    team2_profile_df = get_data_with_index(season_profiles, 'TeamID', team2_id_value)
     
     if len(team1_profile_df) == 0 or len(team2_profile_df) == 0:
         return None  # Skip if either team doesn't have a profile

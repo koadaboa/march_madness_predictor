@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import random
+from ..data.loaders import extract_seed_number
 
 def run_tournament_simulation_pre_tournament(seed_data, predictions_df, tournament_slots, num_simulations=1000):
     """

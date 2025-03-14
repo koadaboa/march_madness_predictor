@@ -41,10 +41,8 @@ def prepare_tournament_data_for_training(tourney_results, features_df, test_seas
 
         # For training data, match with actual tournament results
         for season in train_seasons:
-            season_features = features_df_copy[features_df_copy['Season'] == season].copy()
-            print(f"Season {season}: {len(season_features)} potential matchups")
-            season_results = tourney_results[tourney_results['Season'] == season]
-            print(f"Season {season}: {len(season_results)} actual tournament games")
+            season_features = get_data_with_index(features_df_copy, 'Season', season, indexed_suffix='_by_season').copy()
+            season_results = get_data_with_index(tourney_results, 'Season', season, indexed_suffix='_by_season')
             season_matches = 0
 
             for _, result in season_results.iterrows():
@@ -343,4 +341,3 @@ def train_ensemble_model(X_train, y_train, random_state=42):
     ensemble.fit(X_train, y_train)
 
     return ensemble
-

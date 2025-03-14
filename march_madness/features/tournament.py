@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from march_madness.config import PREDICTION_SEASONS
-from march_madness.utils.data_access import get_data_with_index, get_team_data
+from march_madness.utils.data_access import get_data_with_index
 
 def calculate_tournament_history(tourney_df, current_season=None):
     """
@@ -74,10 +74,10 @@ def calculate_tournament_history(tourney_df, current_season=None):
 
     for season in seasons:
         # Get past games before this season - THIS IS KEY TO PREVENT DATA LEAKAGE
-        past_games = all_records[all_records['Season'] < season]
+        past_games = get_data_with_index(all_records, 'Season', lambda s: s < season)
 
         # Get unique teams that have been in the tournament before this season
-        past_tourney = tourney_df[tourney_df['Season'] < season]
+        past_tourney = get_data_with_index(tourney_df, 'Season', lambda s: s < season, indexed_suffix='_by_season')
         tourney_teams = pd.concat([
             past_tourney['WTeamID'],
             past_tourney['LTeamID']
@@ -199,8 +199,7 @@ def calculate_conference_strength(team_conferences, tourney_data, seed_data, cur
         current_confs = team_conferences[team_conferences['Season'] == season]['ConfAbbrev'].unique()
 
         for conf in current_confs:
-            past_conf = conf_metrics[conf_metrics['Season'] < season]
-            past_conf = past_conf[past_conf['ConfAbbrev'] == conf]
+            past_conf = get_data_with_index(conf_metrics, ('Season', 'ConfAbbrev'), (lambda s: s < season, conf))
 
             if past_conf.empty:
                 # No past data for this conference
@@ -774,7 +773,7 @@ def create_seed_trend_features(seed_data, tourney_results, current_season=None):
 
     for season in seasons_to_analyze:
         # Only use past seasons for analysis relative to the current season being analyzed
-        season_past_tourney = past_tourney[past_tourney['Season'] < season]
+        season_past_tourney = get_data_with_index(past_tourney, 'Season', lambda s: s < season, indexed_suffix='_by_season')
 
         # Add expected rounds if not in the data
         if 'ExpectedRound' not in season_past_tourney.columns:
@@ -824,10 +823,8 @@ def create_seed_trend_features(seed_data, tourney_results, current_season=None):
         # Get team's tournament history
         for team_id in seed_data[seed_data['Season'] == season]['TeamID'].unique():
             # Get the team's appearances and results
-            team_appearances = seed_data[
-                (seed_data['Season'] < season) &
-                (seed_data['TeamID'] == team_id)
-            ]
+            team_appearances = get_data_with_index(seed_data, ('Season', 'TeamID'), 
+            (lambda s: s < season, team_id), indexed_suffix='_by_team')
 
             if len(team_appearances) > 0:
                 performance_by_appearance = []
@@ -838,10 +835,8 @@ def create_seed_trend_features(seed_data, tourney_results, current_season=None):
                     app_seed = int(app_seed_str[1:3]) if isinstance(app_seed_str, str) and len(app_seed_str) >= 2 else None
 
                     # Find the team's games in this tournament
-                    team_games = season_past_tourney[
-                        (season_past_tourney['Season'] == app_season) &
-                        ((season_past_tourney['WTeamID'] == team_id) | (season_past_tourney['LTeamID'] == team_id))
-                    ]
+                    season_games = get_data_with_index(season_past_tourney, 'Season', app_season, indexed_suffix='_by_season')
+                    team_games = season_games[(season_games['WTeamID'] == team_id) | (season_games['LTeamID'] == team_id)]
 
                     # Determine how far the team advanced
                     if len(team_games) > 0:
@@ -924,12 +919,26 @@ def create_seed_trend_features(seed_data, tourney_results, current_season=None):
 
     seed_performance_df = pd.DataFrame(seed_performance)
 
-    # Combine seed history and performance metrics
-    seed_features = seed_history_df.merge(
-        seed_performance_df,
-        on=['Season', 'TeamID'],
-        how='left'
-    )
+    # Check if DataFrames have the required columns before merging
+    if 'Season' not in seed_history_df.columns:
+        print("WARNING: 'Season' column missing in seed_history_df")
+        if len(seed_history_df) > 0:
+            seed_history_df['Season'] = current_season
+    
+    if seed_performance_df is not None and len(seed_performance_df) > 0:
+        if 'Season' not in seed_performance_df.columns:
+            print("WARNING: 'Season' column missing in seed_performance_df")
+            seed_performance_df['Season'] = current_season
+        
+        # Now merge when both have the needed columns
+        seed_features = seed_history_df.merge(
+            seed_performance_df,
+            on=['Season', 'TeamID'],
+            how='left'
+        )
+    else:
+        # Handle case where seed_performance_df is empty or None
+        seed_features = seed_history_df.copy()
 
     # Fill missing values
     seed_features['AvgRoundPerformance'] = seed_features['AvgRoundPerformance'].fillna(0)
