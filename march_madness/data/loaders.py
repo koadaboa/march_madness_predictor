@@ -1,6 +1,7 @@
 import pandas as pd 
 import numpy as np
 import os
+from march_madness.utils.data_access import optimize_dataframes_with_indexes
 
 def filter_time(df, season=2015):
     """
@@ -113,6 +114,9 @@ def load_mens_data(starting_season=2015, data_dir=None):
                                        axis=1)
             data_dict[key] = df
 
+    # Apply indexing optimization before returning
+    data_dict = optimize_dataframes_with_indexes(data_dict)
+
     print(f"Successfully loaded {len(data_dict)} men's datasets from season {starting_season} onwards.")
     return data_dict
 
@@ -190,6 +194,9 @@ def load_womens_data(starting_season=2015, data_dir=None):
             df['MatchupID'] = df.apply(lambda row: f"{row['Season']}_{min(row['WTeamID'], row['LTeamID'])}_{max(row['WTeamID'], row['LTeamID'])}",
                                        axis=1)
             data_dict[key] = df
+
+    # Apply indexing optimization before returning
+    data_dict = optimize_dataframes_with_indexes(data_dict)
 
     print(f"Successfully loaded {len(data_dict)} women's datasets from season {starting_season} onwards.")
     return data_dict

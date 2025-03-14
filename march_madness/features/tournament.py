@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from march_madness.config import PREDICTION_SEASONS
+from march_madness.utils.data_access import get_data_with_index, get_team_data
 
 def calculate_tournament_history(tourney_df, current_season=None):
     """
@@ -198,8 +199,8 @@ def calculate_conference_strength(team_conferences, tourney_data, seed_data, cur
         current_confs = team_conferences[team_conferences['Season'] == season]['ConfAbbrev'].unique()
 
         for conf in current_confs:
-            past_conf = conf_metrics[(conf_metrics['ConfAbbrev'] == conf) &
-                                   (conf_metrics['Season'] < season)]
+            past_conf = conf_metrics[conf_metrics['Season'] < season]
+            past_conf = past_conf[past_conf['ConfAbbrev'] == conf]
 
             if past_conf.empty:
                 # No past data for this conference
@@ -648,10 +649,8 @@ def calculate_conference_tournament_impact(conf_tourney_results, team_conference
             conf_start_day = 132  # Approximate
 
         # Get regular season games before conference tournaments
-        season_reg = reg_season[
-            (reg_season['Season'] == season) &
-            (reg_season['DayNum'] < conf_start_day)
-        ]
+        season_data = get_data_with_index(reg_season, season)
+        season_reg = season_data[season_data['DayNum'] < conf_start_day]
 
         # For each team, get the last 5 games of regular season
         teams = np.union1d(season_reg['WTeamID'].unique(), season_reg['LTeamID'].unique())

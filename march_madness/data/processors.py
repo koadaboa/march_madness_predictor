@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from march_madness.utils.data_access import optimize_dataframes_with_indexes
 
 def filter_reg_season(df, current_season, tournament_days):
     """
@@ -38,6 +39,10 @@ def load_and_filter_data():
     # Load all data from 2015 onwards
     full_mens_data = load_mens_data(STARTING_SEASON)
     full_womens_data = load_womens_data(STARTING_SEASON)
+
+     # Apply indexing optimization to the loaded data
+    full_mens_data = optimize_dataframes_with_indexes(full_mens_data)
+    full_womens_data = optimize_dataframes_with_indexes(full_womens_data)
 
     # Create separate dictionaries for training data (2015-2019) and prediction data (2021-2024)
     mens_train_data = filter_data_dict_by_seasons(full_mens_data,

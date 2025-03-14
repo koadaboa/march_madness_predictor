@@ -174,11 +174,9 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
             return None  # Early exit if any team is missing
 
         # Get team profiles
-        team1_profile_df = team_profiles[(team_profiles['Season'] == season_value) &
-                                      (team_profiles['TeamID'] == team1_id_value)]
-
-        team2_profile_df = team_profiles[(team_profiles['Season'] == season_value) &
-                                      (team_profiles['TeamID'] == team2_id_value)]
+        # Assuming team_profiles is indexed by ['Season', 'TeamID']
+        team1_profile_df = get_data_with_index(team_profiles, (season_value, team1_id_value))
+        team2_profile_df = get_data_with_index(team_profiles, (season_value, team2_id_value))
 
         if len(team1_profile_df) == 0 or len(team2_profile_df) == 0:
             return None
@@ -189,10 +187,8 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
             team2_seed_num = team_to_seed.get(team2_id_value, 17)
         else:
             # Try to get seeds from seed_data (only for tournament teams)
-            team1_seed_row = seed_data[(seed_data['Season'] == season_value) &
-                                    (seed_data['TeamID'] == team1_id_value)]
-            team2_seed_row = seed_data[(seed_data['Season'] == season_value) &
-                                    (seed_data['TeamID'] == team2_id_value)]
+            team1_seed_row = get_data_with_index(seed_data, (season_value, team1_id_value))
+            team2_seed_row = get_data_with_index(seed_data, (season_value, team2_id_value))
 
             team1_seed_num = extract_seed_number(team1_seed_row['Seed'].values[0]) if len(team1_seed_row) > 0 else 17
             team2_seed_num = extract_seed_number(team2_seed_row['Seed'].values[0]) if len(team2_seed_row) > 0 else 17

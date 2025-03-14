@@ -13,6 +13,7 @@ from ..models.training import (create_feature_interactions, handle_class_imbalan
 drop_redundant_features, train_ensemble_model)
 from ..models.evaluation import calibrate_by_expected_round
 from ..models.prediction import run_tournament_simulation_pre_tournament
+from ..utils.data_access import optimize_feature_dataframes
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -34,7 +35,14 @@ def prepare_modeling_data(data_dict, gender, starting_season, current_season, se
 
     # Add debugging for input data
     if 'df_tourney' in data_dict:
-        print(f"DEBUG: {gender} tourney data contains seasons:", sorted(data_dict['df_tourney']['Season'].unique()))
+        # Use:
+        if 'df_tourney_by_season' in data_dict:
+            seasons = sorted(data_dict['df_tourney_by_season'].index.unique())
+        elif 'df_tourney' in data_dict:
+            seasons = sorted(data_dict['df_tourney']['Season'].unique())
+        else:
+            seasons = []
+        print(f"DEBUG: {gender} tourney data contains seasons:", seasons)
         for season in seasons_to_process:
             games = data_dict['df_tourney'][data_dict['df_tourney']['Season'] == season]
             if len(games) > 0:
@@ -283,6 +291,9 @@ def prepare_modeling_data(data_dict, gender, starting_season, current_season, se
         'df_teams': df_teams,
         'df_tourney_slots': df_tourney_slots
     }
+
+    # Add indexes to feature DataFrames
+    return_data = optimize_feature_dataframes(return_data)
 
     return return_data
 
@@ -670,4 +681,3 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
     else:
         print("ERROR: Invalid mode - must specify either training_seasons or prediction_seasons")
         return pd.DataFrame(columns=['Season', 'Team1ID', 'Team2ID', 'Pred', 'MatchupID'])
-
