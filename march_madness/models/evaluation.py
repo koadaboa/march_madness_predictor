@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 from sklearn.calibration import IsotonicRegression
 from sklearn.metrics import brier_score_loss, roc_auc_score, log_loss
+from ..features.matchup import create_tournament_prediction_dataset
+from ..features.tournament import determine_expected_round
+from ..models.training import create_feature_interactions
 
 def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff'):
     """

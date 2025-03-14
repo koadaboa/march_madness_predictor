@@ -201,22 +201,16 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
         team2_profile = team2_profile_df.iloc[0]
 
         # Get conference information - using stored primitive values
-        team1_conf = team_conferences[(team_conferences['Season'] == season_value) &
-                                    (team_conferences['TeamID'] == team1_id_value)]
-
-        team2_conf = team_conferences[(team_conferences['Season'] == season_value) &
-                                    (team_conferences['TeamID'] == team2_id_value)]
+        team1_conf = get_data_with_index(team_conferences, (season_value, team1_id_value), indexed_suffix='_by_team')
+        team2_conf = get_data_with_index(team_conferences, (season_value, team2_id_value), indexed_suffix='_by_team')
 
         # Extract conference information
         team1_conf_abbrev = team1_conf['ConfAbbrev'].values[0] if len(team1_conf) > 0 else 'Unknown'
         team2_conf_abbrev = team2_conf['ConfAbbrev'].values[0] if len(team2_conf) > 0 else 'Unknown'
 
         # Get conference strength - using stored primitive values
-        team1_conf_strength = conf_strength[(conf_strength['Season'] == season_value) &
-                                          (conf_strength['ConfAbbrev'] == team1_conf_abbrev)]
-
-        team2_conf_strength = conf_strength[(conf_strength['Season'] == season_value) &
-                                          (conf_strength['ConfAbbrev'] == team2_conf_abbrev)]
+        team1_conf_strength = get_data_with_index(conf_strength, (season_value, team1_conf_abbrev), indexed_suffix='_by_conf')
+        team2_conf_strength = get_data_with_index(conf_strength, (season_value, team2_conf_abbrev), indexed_suffix='_by_conf')
 
         # Extract conference strength metrics
         team1_conf_win_rate = team1_conf_strength['HistoricalWinRate'].values[0] if len(team1_conf_strength) > 0 else 0.5
@@ -226,11 +220,8 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
         team2_conf_wins_per_team = team2_conf_strength['HistoricalWinsPerTeam'].values[0] if len(team2_conf_strength) > 0 else 0
 
         # Get coach features - using stored primitive values
-        team1_coach = coach_features[(coach_features['Season'] == season_value) &
-                                   (coach_features['TeamID'] == team1_id_value)]
-
-        team2_coach = coach_features[(coach_features['Season'] == season_value) &
-                                   (coach_features['TeamID'] == team2_id_value)]
+        team1_coach = get_data_with_index(coach_features, (season_value, team1_id_value), indexed_suffix='_by_team')
+        team2_coach = get_data_with_index(coach_features, (season_value, team2_id_value), indexed_suffix='_by_team')
 
         # Extract coach metrics
         team1_coach_exp = team1_coach['CoachYearsExp'].values[0] if len(team1_coach) > 0 else 0
@@ -248,11 +239,8 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
 
         # Get tournament history with safeguard for empty dataframe
         if not tourney_history.empty:
-            team1_history = tourney_history[(tourney_history['Season'] == season_value) &
-                                          (tourney_history['TeamID'] == team1_id_value)]
-
-            team2_history = tourney_history[(tourney_history['Season'] == season_value) &
-                                          (tourney_history['TeamID'] == team2_id_value)]
+            team1_history = get_data_with_index(tourney_history, (season_value, team1_id_value), indexed_suffix='_by_team')
+            team2_history = get_data_with_index(tourney_history, (season_value, team2_id_value), indexed_suffix='_by_team')
 
             # Extract tournament history metrics
             team1_appearances = team1_history['TourneyAppearances'].values[0] if len(team1_history) > 0 else 0
@@ -283,11 +271,8 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
         team2_championships = team2_history['Championships'].values[0] if len(team2_history) > 0 else 0
 
         # Get momentum data - using stored primitive values
-        team1_momentum = momentum_data[(momentum_data['Season'] == season_value) &
-                                       (momentum_data['TeamID'] == team1_id_value)]
-
-        team2_momentum = momentum_data[(momentum_data['Season'] == season_value) &
-                                       (momentum_data['TeamID'] == team2_id_value)]
+        team1_momentum = get_data_with_index(momentum_data, (season_value, team1_id_value), indexed_suffix='_by_team')
+        team2_momentum = get_data_with_index(momentum_data, (season_value, team2_id_value), indexed_suffix='_by_team')
 
         # Get various momentum metrics if available, otherwise use defaults
         momentum_metrics = {
@@ -318,11 +303,8 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
                 team2_momentum_vals[metric] = default
 
         # Get strength of schedule - using stored primitive values
-        team1_sos = sos_data[(sos_data['Season'] == season_value) &
-                            (sos_data['TeamID'] == team1_id_value)]
-
-        team2_sos = sos_data[(sos_data['Season'] == season_value) &
-                            (sos_data['TeamID'] == team2_id_value)]
+        team1_sos = get_data_with_index(sos_data, (season_value, team1_id_value), indexed_suffix='_by_team')
+        team2_sos = get_data_with_index(sos_data, (season_value, team2_id_value), indexed_suffix='_by_team')
 
         # Define default SOS values
         sos_defaults = {
@@ -355,11 +337,8 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
 
         if team_consistency is not None:
             # Use stored primitive values
-            team1_consist = team_consistency[(team_consistency['Season'] == season_value) &
-                                          (team_consistency['TeamID'] == team1_id_value)]
-
-            team2_consist = team_consistency[(team_consistency['Season'] == season_value) &
-                                          (team_consistency['TeamID'] == team2_id_value)]
+            team1_consistency = get_data_with_index(team_consistency, (season_value, team1_id_value), indexed_suffix='_by_team')
+            team2_consistency = get_data_with_index(team_consistency, (season_value, team2_id_value), indexed_suffix='_by_team')
 
             if len(team1_consist) > 0:
                 for col in team1_consist.columns:
@@ -396,11 +375,8 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
         # Team play style metrics
         if team_playstyle is not None:
             # Use stored primitive values
-            team1_style_data = team_playstyle[(team_playstyle['Season'] == season_value) &
-                                          (team_playstyle['TeamID'] == team1_id_value)]
-
-            team2_style_data = team_playstyle[(team_playstyle['Season'] == season_value) &
-                                          (team_playstyle['TeamID'] == team2_id_value)]
+            team1_style_data = get_data_with_index(team_playstyle, (season_value, team1_id_value), indexed_suffix='_by_team')
+            team2_style_data = get_data_with_index(team_playstyle, (season_value, team2_id_value), indexed_suffix='_by_team')
 
             # Calculate style matchup compatibility
             if len(team1_style_data) > 0 and len(team2_style_data) > 0:
@@ -427,8 +403,8 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
 
         if pressure_metrics is not None and isinstance(pressure_metrics, pd.DataFrame) and 'TeamID' in pressure_metrics.columns:
             # Note: Not requiring 'Season' column
-            team1_press = pressure_metrics[pressure_metrics['TeamID'] == team1_id_value]
-            team2_press = pressure_metrics[pressure_metrics['TeamID'] == team2_id_value]
+            team1_press = get_data_with_index(pressure_metrics, 'TeamID', team1_id_value)
+            team2_press = get_data_with_index(pressure_metrics, 'TeamID', team2_id_value)
 
             if len(team1_press) > 0:
                 team1_pressure = {
@@ -455,8 +431,8 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
 
         if round_performance is not None and isinstance(round_performance, pd.DataFrame) and 'TeamID' in round_performance.columns:
             # Note: We're not requiring 'Season' column since your debug shows it doesn't have one
-            team1_round = round_performance[round_performance['TeamID'] == team1_id_value]
-            team2_round = round_performance[round_performance['TeamID'] == team2_id_value]
+            team1_round = get_data_with_index(round_performance, 'TeamID', team1_id_value)
+            team2_round = get_data_with_index(round_performance, 'TeamID', team2_id_value)
 
             if len(team1_round) > 0:
                 # Extract round-specific metrics for the expected round
@@ -487,11 +463,8 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
 
         if conf_impact is not None:
             # Use stored primitive values
-            team1_conf = conf_impact[(conf_impact['Season'] == season_value) &
-                                   (conf_impact['TeamID'] == team1_id_value)]
-
-            team2_conf = conf_impact[(conf_impact['Season'] == season_value) &
-                                   (conf_impact['TeamID'] == team2_id_value)]
+            team1_conf = get_data_with_index(conf_impact, (season_value, team1_id_value), indexed_suffix='_by_team')
+            team2_conf = get_data_with_index(conf_impact, (season_value, team2_id_value), indexed_suffix='_by_team')
 
             if len(team1_conf) > 0:
                 team1_conf_impact = {
@@ -520,11 +493,8 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
 
         if seed_features is not None:
             # Use stored primitive values
-            team1_seed = seed_features[(seed_features['Season'] == season_value) &
-                                     (seed_features['TeamID'] == team1_id_value)]
-
-            team2_seed = seed_features[(seed_features['Season'] == season_value) &
-                                     (seed_features['TeamID'] == team2_id_value)]
+            team1_seed = get_data_with_index(seed_features, (season_value, team1_id_value), indexed_suffix='_by_team')
+            team2_seed = get_data_with_index(seed_features, (season_value, team2_id_value), indexed_suffix='_by_team')
 
             if len(team1_seed) > 0:
                 team1_seed_trends = {
@@ -555,16 +525,13 @@ def create_matchup_features_pre_tournament(team1_id, team2_id, season, team_prof
             # Check if required columns exist before trying to use them
             if 'Season' in coach_metrics.columns and 'TeamID' in coach_metrics.columns:
                 # Only filter if both required columns exist
-                team1_coach_m = coach_metrics[(coach_metrics['Season'] == season_value) &
-                                            (coach_metrics['TeamID'] == team1_id_value)]
+                team1_coach = get_data_with_index(coach_metrics, (season_value, team1_id_value), indexed_suffix='_by_team')
+                team2_coach = get_data_with_index(coach_metrics, (season_value, team2_id_value), indexed_suffix='_by_team')
 
-                team2_coach_m = coach_metrics[(coach_metrics['Season'] == season_value) &
-                                            (coach_metrics['TeamID'] == team2_id_value)]
-
-                if len(team1_coach_m) > 0:
+                if len(team1_coach) > 0:
                     team1_coach_tourney = {
-                        'PriorTourneyWinRate': team1_coach_m['PriorTourneyWinRate'].values[0],
-                        'UpsetRate': team1_coach_m['UpsetRate'].values[0],
+                        'PriorTourneyWinRate': team1_coach['PriorTourneyWinRate'].values[0],
+                        'UpsetRate': team1_coach['UpsetRate'].values[0],
                         'UpsetDefenseRate': team1_coach_m['UpsetDefenseRate'].values[0]
                     }
 
