@@ -8,7 +8,7 @@ from ..features.matchup import create_tournament_prediction_dataset
 from ..models.training import create_feature_interactions
 
 
-def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff'):
+def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff', gender=None):
     calibrated_preds = np.copy(predictions)
     seed_diffs = X_test[seed_diff_col].values if isinstance(X_test, pd.DataFrame) else X_test[:, seed_diff_col]
     
@@ -18,6 +18,48 @@ def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff'):
     
     # Use both seed differences and win rate differences for calibration
     win_rate_diffs = X_test['WinRateDiff'].values if 'WinRateDiff' in X_test.columns else None
+
+    # Add this gender-specific code
+    # Women's tournament calibration values
+    if gender == "women's":
+        # In women's tournament, higher seeds tend to win more frequently
+        seed_factors = {
+            'heavy_favorite_seed': 1.10,    # Boost predictions for heavy favorites
+            'favorite_seed': 1.08,
+            'slight_favorite_seed': 1.05,
+            'even_seed': 1.0,
+            'slight_underdog_seed': 0.92,
+            'underdog_seed': 0.85,
+            'heavy_underdog_seed': 0.80     # Significant reduction for heavy underdogs
+        }
+        
+        # Momentum has different effect in women's tournament
+        momentum_factors = {
+            '_strong_form': 1.12,           # Recent performance matters more
+            '_good_form': 1.06,
+            '_neutral_form': 1.0,
+            '_poor_form': 0.95,
+            '_weak_form': 0.90
+        }
+    else:
+        # Men's tournament calibration values (unchanged)
+        seed_factors = {
+            'heavy_favorite_seed': 1.05,
+            'favorite_seed': 1.03,
+            'slight_favorite_seed': 1.01,
+            'even_seed': 1.0,
+            'slight_underdog_seed': 0.98,
+            'underdog_seed': 0.97,
+            'heavy_underdog_seed': 0.95
+        }
+        
+        momentum_factors = {
+            '_strong_form': 1.05,
+            '_good_form': 1.02,
+            '_neutral_form': 1.0,
+            '_poor_form': 0.98,
+            '_weak_form': 0.95
+        }
     
     # Create segments based on both seed and win rate differences
     segments = []

@@ -705,3 +705,81 @@ def calculate_team_playstyle(team_games):
 
     return all_styles
 
+def calculate_womens_specific_features(team_games, team_profiles):
+    """
+    Calculate features specifically tuned for women's basketball using available data fields
+    """
+    womens_features = []
+    
+    for _, team_profile in team_profiles.iterrows():
+        team_id = team_profile['TeamID']
+        season = team_profile['Season']
+        
+        # Get team's games
+        team_season_games = team_games[(team_games['Season'] == season) & 
+                                       (team_games['TeamID'] == team_id)]
+        
+        if len(team_season_games) == 0:
+            continue
+            
+        # Calculate women's game specific metrics with available fields
+        try:
+            # 1. Scoring distribution metrics (using existing data)
+            points_from_2 = (team_season_games['FGM'] - team_season_games['FGM3']).sum() * 2
+            points_from_3 = team_season_games['FGM3'].sum() * 3
+            points_from_ft = team_season_games['FTM'].sum()
+            total_points = team_season_games['Score'].sum()
+            
+            if total_points > 0:
+                scoring_dist_2pt = points_from_2 / total_points
+                scoring_dist_3pt = points_from_3 / total_points
+                scoring_dist_ft = points_from_ft / total_points
+            else:
+                scoring_dist_2pt = scoring_dist_3pt = scoring_dist_ft = 0.333
+            
+            # 2. Assist-to-Field Goal ratio (team ball movement indicator)
+            total_fgm = team_season_games['FGM'].sum()
+            total_ast = team_season_games['Ast'].sum()
+            ast_to_fgm = total_ast / total_fgm if total_fgm > 0 else 0
+            
+            # 3. Defense intensity metrics - using steals and blocks
+            def_intensity = (team_season_games['Stl'].sum() + team_season_games['Blk'].sum()) / len(team_season_games)
+            
+            # 4. Free throw reliance
+            ft_reliance = team_season_games['FTA'].sum() / team_season_games['FGA'].sum() if team_season_games['FGA'].sum() > 0 else 0
+            
+            # 5. Rebounding advantage - using available data
+            total_reb = team_season_games['OR'].sum() + team_season_games['DR'].sum()
+            total_games = len(team_season_games)
+            reb_per_game = total_reb / total_games if total_games > 0 else 0
+            
+            # 6. Turnover management (women's game often involves different turnover patterns)
+            to_rate = team_season_games['TO'].sum() / team_season_games['Possessions'].sum() if team_season_games['Possessions'].sum() > 0 else 0
+            
+            # 7. Field goal efficiency comparison
+            fg2_pct = (team_season_games['FGM'] - team_season_games['FGM3']).sum() / (team_season_games['FGA'] - team_season_games['FGA3']).sum() if (team_season_games['FGA'] - team_season_games['FGA3']).sum() > 0 else 0
+            fg3_pct = team_season_games['FGM3'].sum() / team_season_games['FGA3'].sum() if team_season_games['FGA3'].sum() > 0 else 0
+            fg_ratio = fg2_pct / fg3_pct if fg3_pct > 0 else 1.0
+            
+            womens_features.append({
+                'Season': season,
+                'TeamID': team_id,
+                'Womens_ScoringDist_2pt': scoring_dist_2pt,
+                'Womens_ScoringDist_3pt': scoring_dist_3pt,
+                'Womens_ScoringDist_FT': scoring_dist_ft,
+                'Womens_AstToFGM': ast_to_fgm,
+                'Womens_DefIntensity': def_intensity,
+                'Womens_FTReliance': ft_reliance,
+                'Womens_RebPerGame': reb_per_game,
+                'Womens_TORate': to_rate,
+                'Womens_FG2to3Ratio': fg_ratio
+            })
+        except Exception as e:
+            print(f"Error calculating women's features for team {team_id}, season {season}: {str(e)}")
+            continue
+    
+    # Only return if we actually generated features
+    result_df = pd.DataFrame(womens_features) if womens_features else pd.DataFrame()
+    if not result_df.empty:
+        print(f"Generated women's-specific features for {len(result_df)} team-seasons")
+    return result_df

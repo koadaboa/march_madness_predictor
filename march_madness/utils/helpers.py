@@ -4,7 +4,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import brier_score_loss, roc_auc_score, log_loss
 from ..data.processors import filter_reg_season
 from ..features.team_features import (create_team_season_profiles, calculate_momentum_features, 
-enhance_team_metrics, calculate_coach_features, calculate_strength_of_schedule)
+enhance_team_metrics, calculate_coach_features, calculate_strength_of_schedule, calculate_womens_specific_features)
 from ..features.tournament import (calculate_tournament_history, calculate_conference_strength,
 calculate_expected_round_features, create_seed_trend_features, calculate_conference_tournament_impact, 
 calculate_coach_tournament_metrics)
@@ -118,6 +118,15 @@ def prepare_modeling_data(data_dict, gender, starting_season, current_season, se
         tournament_days=tournament_days
     )
     print(f"Created profiles for {len(team_profiles)} team-seasons")
+
+    if gender == "women's":
+        print("\n1a. Adding women's-specific features...")
+        womens_features = calculate_womens_specific_features(all_team_games, team_profiles)
+        if not womens_features.empty:
+            team_profiles = team_profiles.merge(womens_features, on=['Season', 'TeamID'], how='left')
+            print(f"Added women's-specific features to {len(team_profiles)} team profiles")
+        else:
+            print("No women's-specific features were generated")
 
     print("\n2. Calculating momentum features...")
     momentum_data = calculate_momentum_features(
@@ -428,7 +437,81 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
 
         # Train model
         print(f"\n14. Training ensemble model for {gender}'s tournaments...")
-        model = train_ensemble_model(X_train_balanced, y_train_balanced, random_state=3)
+        if gender == "women's":
+            # Women's model with specific hyperparameters
+            from xgboost import XGBClassifier
+            from lightgbm import LGBMClassifier
+            from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+            from sklearn.linear_model import LogisticRegression
+            
+            print("Using women's-specific model hyperparameters...")
+            # XGBoost with different parameters
+            xgb_model = XGBClassifier(
+                n_estimators=500,
+                learning_rate=0.05,
+                max_depth=5,  # Slightly higher to capture different patterns
+                subsample=0.85,
+                colsample_bytree=0.75,
+                gamma=0.15,
+                reg_alpha=0.25,
+                reg_lambda=1.0,
+                min_child_weight=2,
+                scale_pos_weight=1.0,
+                random_state=random_state if 'random_state' in locals() else 42
+            )
+            
+            # LightGBM with women's-specific parameters
+            lgb_model = LGBMClassifier(
+                n_estimators=500,
+                learning_rate=0.05,
+                max_depth=6,  # Deeper trees
+                num_leaves=32,
+                subsample=0.7,
+                colsample_bytree=0.7,
+                reg_alpha=0.15,
+                reg_lambda=1.2,
+                min_child_samples=15,
+                class_weight='balanced',
+                random_state=random_state if 'random_state' in locals() else 42
+            )
+            
+            # Random Forest
+            rf_model = RandomForestClassifier(
+                n_estimators=400,
+                max_depth=10,
+                min_samples_split=8,
+                min_samples_leaf=4,
+                max_features='sqrt',
+                class_weight='balanced',
+                random_state=random_state if 'random_state' in locals() else 42,
+                n_jobs=-1
+            )
+            
+            # Logistic Regression for calibration
+            logistic_model = LogisticRegression(
+                C=0.9,
+                class_weight='balanced',
+                solver='liblinear',
+                random_state=random_state if 'random_state' in locals() else 42
+            )
+            
+            # Create ensemble with women's-specific weights
+            model = VotingClassifier(
+                estimators=[
+                    ('xgb', xgb_model),
+                    ('lgb', lgb_model),
+                    ('rf', rf_model),
+                    ('lr', logistic_model)
+                ],
+                voting='soft',
+                weights=[0.45, 0.25, 0.15, 0.15]  # Different weights than men's model
+            )
+
+            print("Fitting women's-specific ensemble model...")
+            model.fit(X_train_balanced, y_train_balanced)
+        else:
+            model = train_ensemble_model(X_train_balanced, y_train_balanced, random_state=3)
+
         print("Model trained")
 
         # Validate model if validation season is provided
@@ -478,7 +561,8 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
                     val_preds_calibrated = calibrate_by_expected_round(
                         val_preds_proba,
                         validation_df,
-                        seed_diff_col='SeedDiff'
+                        seed_diff_col='SeedDiff',
+                        gender=gender
                     )
 
                     # Calculate metrics
@@ -612,7 +696,8 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
                         pred_calibrated = calibrate_by_expected_round(
                             pred_proba,
                             season_predictions,
-                            seed_diff_col='SeedDiff'
+                            seed_diff_col='SeedDiff',
+                            gender=gender
                         )
                     except Exception as e:
                         print(f"Error in calibration: {e}")
