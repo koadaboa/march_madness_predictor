@@ -128,35 +128,7 @@ def prepare_modeling_data(data_dict, gender, starting_season, current_season, se
         else:
             print("No women's-specific features were generated")
 
-    print("\n2. Calculating momentum features...")
-    momentum_data = calculate_momentum_features(
-        all_team_games,
-        current_season=current_season,
-        tournament_days=tournament_days
-    )
-    print(f"Generated momentum features for {len(momentum_data)} team-seasons")
-
-    # Coach features
-    if not df_coaches.empty:
-        print("\n3. Calculating coach features...")
-        # SAFEGUARD: Use safe_tourney_df instead of df_tourney
-        coach_features = calculate_coach_features(df_coaches, safe_tourney_df)
-        print(f"Generated coach features for {len(coach_features)} team-seasons")
-    else:
-        coach_features = pd.DataFrame(columns=['Season', 'TeamID', 'CoachName', 'CoachYearsExp', 'CoachTourneyExp', 'CoachChampionships'])
-        print("No coach data available, using empty coach features")
-
-    print("\n4. Calculating tournament history...")
-    # SAFEGUARD: Use safe_tourney_df instead of df_tourney
-    tourney_history = calculate_tournament_history(safe_tourney_df, current_season=current_season)
-    print(f"Calculated tournament history for {len(tourney_history)} team-seasons")
-
-    print("\n5. Calculating conference strength...")
-    # SAFEGUARD: Use safe_tourney_df instead of df_tourney
-    conf_strength = calculate_conference_strength(df_team_conferences, safe_tourney_df, df_seed, current_season=current_season)
-    print(f"Calculated conference strength for {len(conf_strength)} conference-seasons")
-
-    print("\n6. Enhancing team metrics...")
+    print("\n7. Enhancing team metrics...")
     enhanced_team_games, enhanced_team_profiles = enhance_team_metrics(
         all_team_games,
         team_profiles,
@@ -164,7 +136,7 @@ def prepare_modeling_data(data_dict, gender, starting_season, current_season, se
     )
     print(f"Enhanced metrics for {len(enhanced_team_profiles)} team-seasons")
 
-    print("\n7. Calculating strength of schedule...")
+    print("\n2. Calculating strength of schedule...")
     sos_data = calculate_strength_of_schedule(
         filtered_reg,
         enhanced_team_profiles,
@@ -172,6 +144,36 @@ def prepare_modeling_data(data_dict, gender, starting_season, current_season, se
         tournament_days=tournament_days
     )
     print(f"Calculated SOS for {len(sos_data)} team-seasons")
+
+    print("\n3. Calculating advanced momentum features...")
+    momentum_data = calculate_momentum_features(
+        all_team_games,
+        current_season=current_season,
+        tournament_days=tournament_days,
+        team_profiles=enhanced_team_profiles,
+        sos_data=sos_data
+    )
+    print(f"Generated advanced momentum features for {len(momentum_data)} team-seasons")
+
+    # Coach features
+    if not df_coaches.empty:
+        print("\n4. Calculating coach features...")
+        # SAFEGUARD: Use safe_tourney_df instead of df_tourney
+        coach_features = calculate_coach_features(df_coaches, safe_tourney_df)
+        print(f"Generated coach features for {len(coach_features)} team-seasons")
+    else:
+        coach_features = pd.DataFrame(columns=['Season', 'TeamID', 'CoachName', 'CoachYearsExp', 'CoachTourneyExp', 'CoachChampionships'])
+        print("No coach data available, using empty coach features")
+
+    print("\n5. Calculating tournament history...")
+    # SAFEGUARD: Use safe_tourney_df instead of df_tourney
+    tourney_history = calculate_tournament_history(safe_tourney_df, current_season=current_season)
+    print(f"Calculated tournament history for {len(tourney_history)} team-seasons")
+
+    print("\n6. Calculating conference strength...")
+    # SAFEGUARD: Use safe_tourney_df instead of df_tourney
+    conf_strength = calculate_conference_strength(df_team_conferences, safe_tourney_df, df_seed, current_season=current_season)
+    print(f"Calculated conference strength for {len(conf_strength)} conference-seasons")
 
     print("\n8. Calculating tournament-specific features...")
     # Calculate tournament features

@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from ..data.processors import filter_reg_season
+from ..utils.data_access import get_data_with_index
 
 def engineer_team_season_stats(season_games_df, team_id_col, opp_team_id_col):
     """
@@ -157,7 +158,11 @@ def create_team_season_profiles(regular_season_df, current_season=None, tourname
 
     return team_season_stats, all_team_games
 
-def calculate_momentum_features(game_data, current_season=None, tournament_days=None):
+# Replace the existing calculate_momentum_features function in march_madness/features/team_features.py
+# with this enhanced version (keeps the same function name)
+
+def calculate_momentum_features(game_data, current_season=None, tournament_days=None, 
+                              team_profiles=None, sos_data=None):
     """
     Calculate momentum features based on recent game performance
     Uses shift to avoid data leakage and only includes regular season games
@@ -166,52 +171,337 @@ def calculate_momentum_features(game_data, current_season=None, tournament_days=
         game_data: DataFrame with all team games
         current_season: Current season for prediction
         tournament_days: List of tournament day numbers to exclude
+        team_profiles: DataFrame with team profile data (optional, for advanced features)
+        sos_data: DataFrame with strength of schedule data (optional, for advanced features)
 
     Returns:
         DataFrame with momentum features
     """
+    import numpy as np
+    import pandas as pd
+    from ..data.processors import filter_reg_season
+    from ..utils.data_access import get_data_with_index
+    
     # Filter to only include regular season games
     reg_season_data = filter_reg_season(game_data, current_season, tournament_days)
-
+    
     # Sort by team and date
     reg_season_data = reg_season_data.sort_values(['Season', 'TeamID', 'DayNum'])
-
+    
     # Define momentum windows
     short_window = 3
     medium_window = 5
     long_window = 10
-
+    
     # Calculate rolling averages with proper shifting
-    momentum_cols = ['Win', 'ScoreMargin', 'OffEfficiency', 'FGPct', 'FG3Pct']
-    for col in momentum_cols:
+    basic_momentum_cols = ['Win', 'ScoreMargin', 'OffEfficiency', 'FGPct', 'FG3Pct']
+    for col in basic_momentum_cols:
         # Short-term momentum (last 3 games)
         reg_season_data[f'{col}_Last{short_window}'] = reg_season_data.groupby(['Season', 'TeamID'])[col].transform(
             lambda x: x.rolling(window=short_window, min_periods=1).mean()
         )
-
+        
         # Medium-term momentum (last 5 games)
         reg_season_data[f'{col}_Last{medium_window}'] = reg_season_data.groupby(['Season', 'TeamID'])[col].transform(
             lambda x: x.rolling(window=medium_window, min_periods=1).mean()
         )
-
+        
         # Long-term momentum (last 10 games)
         reg_season_data[f'{col}_Last{long_window}'] = reg_season_data.groupby(['Season', 'TeamID'])[col].transform(
             lambda x: x.rolling(window=long_window, min_periods=1).mean()
         )
-
+        
         # Exponentially weighted momentum
         reg_season_data[f'{col}_Exp'] = reg_season_data.groupby(['Season', 'TeamID'])[col].transform(
             lambda x: x.ewm(span=5, min_periods=1).mean()
         )
+    
+    # If we have the required data for advanced features, calculate them
+    if team_profiles is not None and sos_data is not None:
+        try:
+            # 1. Add opponent strength
+            # Create a dictionary for quick opponent strength lookup
+            opponent_strength = {}
+            for _, row in sos_data.iterrows():
+                opponent_strength[(row['Season'], row['TeamID'])] = row.get('AvgOpponentWinRate', 0.5)
+            
+            # Add opponent strength to each game
+            reg_season_data['OpponentStrength'] = reg_season_data.apply(
+                lambda row: opponent_strength.get((row['Season'], row['OpponentID']), 0.5),
+                axis=1
+            )
+            
+            # 1. Opponent-Weighted Momentum Features
+            # Weight wins and scoring by opponent strength
+            reg_season_data['WeightedWin'] = reg_season_data['Win'] * reg_season_data['OpponentStrength'] * 2
+            reg_season_data['WeightedScoreMargin'] = reg_season_data['ScoreMargin'] * reg_season_data['OpponentStrength'] * 2
+            
+            for window in [short_window, medium_window, long_window]:
+                # Weighted win momentum
+                reg_season_data[f'WeightedWin_Last{window}'] = reg_season_data.groupby(['Season', 'TeamID'])['WeightedWin'].transform(
+                    lambda x: x.rolling(window=window, min_periods=1).mean()
+                )
+                
+                # Weighted score margin momentum
+                reg_season_data[f'WeightedScoreMargin_Last{window}'] = reg_season_data.groupby(['Season', 'TeamID'])['WeightedScoreMargin'].transform(
+                    lambda x: x.rolling(window=window, min_periods=1).mean()
+                )
+            
+            # Exponential weighted quality win momentum
+            reg_season_data['WeightedWin_Exp'] = reg_season_data.groupby(['Season', 'TeamID'])['WeightedWin'].transform(
+                lambda x: x.ewm(span=5, min_periods=1).mean()
+            )
+            
+            # 2. Trend-Based Momentum (is team improving or declining?)
+            # Calculate trend over last N games for key metrics
+            for col in ['Win', 'ScoreMargin', 'OffEfficiency']:
+                for window in [medium_window, long_window]:
+                    # Use linear regression slope as trend
+                    reg_season_data[f'{col}_Trend_{window}'] = reg_season_data.groupby(['Season', 'TeamID'])[col].transform(
+                        lambda x: calculate_trend(x, window)
+                    )
+            
+            # 3. Consistency/Volatility in Recent Performance
+            # Calculate standard deviation in recent scoring and efficiency
+            for col in ['Score', 'ScoreMargin', 'OffEfficiency']:
+                for window in [medium_window, long_window]:
+                    reg_season_data[f'{col}_Volatility_{window}'] = reg_season_data.groupby(['Season', 'TeamID'])[col].transform(
+                        lambda x: x.rolling(window=window, min_periods=2).std()
+                    )
+            
+            # 4. Recent Performance Against Quality Opponents
+            # Tag games against top-tier opponents (win rate > 0.7)
+            reg_season_data['QualityOpponent'] = reg_season_data['OpponentStrength'] > 0.7
 
+            # Initialize quality opponent columns with NaN values
+            for window in [long_window, 20]:
+                reg_season_data[f'QualityOpp_WinRate_{window}'] = np.nan
+                reg_season_data[f'QualityOpp_ScoreMargin_{window}'] = np.nan
+
+            # Process each team-season group individually
+            for (season, team_id), group in reg_season_data.groupby(['Season', 'TeamID']):
+                # Check if this team has any quality opponents
+                quality_games = group[group['QualityOpponent']]
+                
+                if len(quality_games) > 0:
+                    # This team has played quality opponents
+                    for window in [long_window, 20]:
+                        try:
+                            # Calculate cumulative metrics for this team
+                            qual_win_rate = quality_games['Win'].expanding().mean()
+                            qual_margin = quality_games['ScoreMargin'].expanding().mean()
+                            
+                            # Get the last values (most current) and update only those
+                            last_idx = group.index[-1]
+                            if not qual_win_rate.empty:
+                                reg_season_data.loc[last_idx, f'QualityOpp_WinRate_{window}'] = qual_win_rate.iloc[-1]
+                                reg_season_data.loc[last_idx, f'QualityOpp_ScoreMargin_{window}'] = qual_margin.iloc[-1]
+                        except Exception as e:
+                            print(f"  Warning: Error calculating quality metrics for team {team_id}, season {season}: {str(e)}")
+            
+            # 5. Late Season Momentum (give more weight to most recent games)
+            # Implement a decay function that gives higher weight to more recent games
+            for team_season_group in reg_season_data.groupby(['Season', 'TeamID']):
+                team_key, team_data = team_season_group
+                if len(team_data) >= 5:
+                    # Calculate days from last game for each game
+                    max_day = team_data['DayNum'].max()
+                    team_data['DaysFromLast'] = max_day - team_data['DayNum']
+                    
+                    # Apply decay weights using decay factor
+                    decay_factor = 0.95  # 5% decay per game back
+                    team_data['LateSeasonWeight'] = team_data['DaysFromLast'].apply(lambda x: decay_factor ** x)
+                    
+                    # Calculate weighted metrics
+                    team_data['LateSeasonWin'] = team_data['Win'] * team_data['LateSeasonWeight']
+                    team_data['LateSeasonMargin'] = team_data['ScoreMargin'] * team_data['LateSeasonWeight']
+                    
+                    # Update the original dataframe for this team and season
+                    idx = team_data.index
+                    reg_season_data.loc[idx, 'LateSeasonWeight'] = team_data['LateSeasonWeight']
+                    reg_season_data.loc[idx, 'LateSeasonWin'] = team_data['LateSeasonWin'] 
+                    reg_season_data.loc[idx, 'LateSeasonMargin'] = team_data['LateSeasonMargin']
+            
+            # Calculate late season momentum metrics
+            reg_season_data['LateSeasonWin_Sum'] = reg_season_data.groupby(['Season', 'TeamID'])['LateSeasonWin'].transform(
+                lambda x: x.rolling(window=10, min_periods=1).sum()
+            )
+            reg_season_data['LateSeasonWeight_Sum'] = reg_season_data.groupby(['Season', 'TeamID'])['LateSeasonWeight'].transform(
+                lambda x: x.rolling(window=10, min_periods=1).sum()
+            )
+            
+            # Normalize the weighted sum by the sum of weights
+            reg_season_data['LateSeasonWinRate'] = reg_season_data['LateSeasonWin_Sum'] / reg_season_data['LateSeasonWeight_Sum'].replace(0, 1)
+            
+            # 6. Close Game Performance Momentum
+            # Tag close games (margin ≤ 5 points)
+            reg_season_data['CloseGame'] = abs(reg_season_data['ScoreMargin']) <= 5
+            
+            # Calculate performance in close games
+            reg_season_data['CloseGameWin'] = (reg_season_data['CloseGame'] & (reg_season_data['Win'] == 1)).astype(int)
+            
+            # Calculate rolling performance in close games
+            for window in [medium_window, long_window]:
+                reg_season_data[f'CloseGameWinRate_{window}'] = reg_season_data.groupby(['Season', 'TeamID'])['CloseGameWin'].transform(
+                    lambda x: calculate_conditional_mean(x, reg_season_data.loc[x.index, 'CloseGame'], window)
+                )
+            
+            # 7. Conference Game Momentum
+            # Assuming each team can determine its conference from team_profiles or another source
+            if 'ConfAbbrev' in reg_season_data.columns:
+                # Tag games against conference opponents
+                reg_season_data['ConfGame'] = reg_season_data.apply(
+                    lambda row: row['ConfAbbrev'] == get_team_conference(row['OpponentID'], row['Season'], team_profiles),
+                    axis=1
+                )
+                
+                # Calculate conference game performance
+                for window in [5, 10]:
+                    reg_season_data[f'ConfGameWinRate_{window}'] = reg_season_data.groupby(['Season', 'TeamID']).apply(
+                        lambda group: group['Win'][group['ConfGame']].rolling(window=window, min_periods=1).mean()
+                    ).reset_index(level=[0,1], drop=True)
+            
+            # 8. Momentum Composite Score
+            # Create a combined momentum score from multiple factors
+            reg_season_data['MomentumComposite'] = (
+                # Recent win rate (40%)
+                0.40 * reg_season_data['Win_Last5'] + 
+                # Opponent-adjusted win rate (25%)
+                0.25 * reg_season_data['WeightedWin_Last5'] + 
+                # Trend (15%)
+                0.15 * np.clip(reg_season_data['Win_Trend_10'] * 10, -1, 1) + 
+                # Late season momentum (20%)
+                0.20 * reg_season_data['LateSeasonWinRate']
+            )
+            
+            print("Successfully calculated advanced momentum features")
+            
+        except Exception as e:
+            print(f"Error calculating advanced momentum features: {str(e)}")
+            print("Will proceed with basic momentum features only")
+    
     # Get final values at the end of regular season for each team and season
     latest_momentum = reg_season_data.sort_values(['Season', 'TeamID', 'DayNum']).groupby(['Season', 'TeamID']).last().reset_index()
-
-    # Select only momentum columns
-    momentum_cols = [col for col in latest_momentum.columns if any(x in col for x in
-                                                                  ['_Last', '_Exp', 'WinStreak'])]
-
+    
+    # Select all momentum columns
+    momentum_cols = [col for col in latest_momentum.columns if any(x in col for x in 
+                                                                 ['_Last', '_Exp', 'WinStreak', 
+                                                                  'Weighted', '_Trend_', '_Volatility_', 
+                                                                  'QualityOpp_', 'LateSeasonWin', 'LateSeasonWinRate',
+                                                                  'CloseGameWinRate_', 'ConfGameWinRate_',
+                                                                  'MomentumComposite'])]
+    
     return latest_momentum[['Season', 'TeamID'] + momentum_cols]
+
+def calculate_trend(series, window):
+    """
+    Calculate the linear trend (slope) of recent values in a series
+    
+    Args:
+        series: Time series of values
+        window: Number of most recent values to use
+        
+    Returns:
+        Slope coefficient (trend)
+    """
+    import numpy as np
+    
+    values = series.iloc[-window:] if len(series) >= window else series
+    if len(values) <= 1:
+        return 0
+    
+    # Create x values (0, 1, 2, ...)
+    x = np.arange(len(values))
+    # Get y values
+    y = values.values
+    
+    # Handle null/nan values
+    mask = ~np.isnan(y)
+    if sum(mask) <= 1:  # Need at least two valid points
+        return 0
+    
+    x = x[mask]
+    y = y[mask]
+    
+    # Calculate slope using linear regression
+    if len(x) > 1:
+        try:
+            slope = np.polyfit(x, y, 1)[0]
+            return slope
+        except:
+            return 0
+    return 0
+
+def calculate_conditional_mean(values, condition, window):
+    """
+    Calculate rolling mean for values where condition is True
+    
+    Args:
+        values: Series of values
+        condition: Boolean series indicating which values to include
+        window: Rolling window size
+        
+    Returns:
+        Series with rolling conditional mean
+    """
+    import numpy as np
+    import pandas as pd
+    
+    result = pd.Series(index=values.index, dtype=float)
+    
+    for i in range(len(values)):
+        # Get last N values where condition was met
+        end_idx = i + 1
+        start_idx = max(0, end_idx - window)
+        
+        # Extract relevant subset
+        subset_vals = values.iloc[start_idx:end_idx]
+        subset_cond = condition.iloc[start_idx:end_idx]
+        
+        # Filter values by condition
+        filtered = subset_vals[subset_cond]
+        
+        # Calculate mean if any values remain
+        if len(filtered) > 0:
+            result.iloc[i] = filtered.mean()
+        else:
+            result.iloc[i] = np.nan
+    
+    return result
+
+def get_team_conference(team_id, season, team_profiles):
+    """
+    Get team's conference from team_profiles
+    
+    Args:
+        team_id: Team ID
+        season: Season
+        team_profiles: DataFrame with team profiles
+        
+    Returns:
+        Conference name
+    """
+    from ..utils.data_access import get_data_with_index
+    
+    # Try to use get_data_with_index for optimized lookup
+    try:
+        # Check if team_profiles has the right structure
+        if hasattr(team_profiles, 'index') and isinstance(team_profiles.index, pd.MultiIndex):
+            # If team_profiles is already indexed by Season and TeamID
+            if 'ConfAbbrev' in team_profiles.columns:
+                team_data = get_data_with_index(team_profiles, ('Season', 'TeamID'), (season, team_id))
+                if not team_data.empty:
+                    return team_data['ConfAbbrev'].iloc[0]
+        else:
+            # If team_profiles is a regular DataFrame
+            if 'ConfAbbrev' in team_profiles.columns:
+                team_data = team_profiles[(team_profiles['Season'] == season) & (team_profiles['TeamID'] == team_id)]
+                if not team_data.empty:
+                    return team_data['ConfAbbrev'].iloc[0]
+    except Exception as e:
+        pass
+    
+    return None
 
 def calculate_coach_features(coaches_df, tourney_df):
     """
