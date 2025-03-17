@@ -12,7 +12,7 @@ from ..features.matchup import (create_seed_based_features, create_seed_based_pr
 create_seed_based_trend_features, calculate_seed_based_probability, create_tournament_prediction_dataset)
 from ..models.training import (create_feature_interactions, handle_class_imbalance, 
 drop_redundant_features, train_ensemble_model)
-from ..models.evaluation import calibrate_by_expected_round
+from ..models.evaluation import calibrate_by_expected_round, calibrate_mens_predictions
 from ..models.prediction import run_tournament_simulation_pre_tournament
 from ..utils.data_access import optimize_feature_dataframes, get_data_with_index
 import warnings
@@ -559,13 +559,21 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
                     # Make predictions
                     val_preds_proba = model.predict_proba(X_val_reduced)[:, 1]
 
-                    # Apply calibration
-                    val_preds_calibrated = calibrate_by_expected_round(
-                        val_preds_proba,
-                        validation_df,
-                        seed_diff_col='SeedDiff',
-                        gender=gender
-                    )
+                    if gender == "women's":
+                        # Apply calibration
+                        val_preds_calibrated = calibrate_by_expected_round(
+                            val_preds_proba,
+                            validation_df,
+                            seed_diff_col='SeedDiff',
+                            gender= "women's"
+                        )
+                    else:
+                        # Apply calibration
+                        val_preds_calibrated = calibrate_mens_predictions(
+                            val_preds_proba,
+                            validation_df,
+                            seed_diff_col='SeedDiff'
+                        )
 
                     # Calculate metrics
                     val_log_loss = log_loss(y_val, val_preds_proba)

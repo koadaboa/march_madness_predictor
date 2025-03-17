@@ -9,152 +9,357 @@ from ..models.training import create_feature_interactions
 
 
 def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff', gender=None):
+    """
+    Calibrate predictions with gender-specific and round-specific adjustments
+    based on comprehensive tournament analysis.
+    """
     calibrated_preds = np.copy(predictions)
     seed_diffs = X_test[seed_diff_col].values if isinstance(X_test, pd.DataFrame) else X_test[:, seed_diff_col]
     
-    # Get team seed information if available
-    team1_seeds = X_test['Team1Seed'].values if 'Team1Seed' in X_test.columns else None
-    team2_seeds = X_test['Team2Seed'].values if 'Team2Seed' in X_test.columns else None
+    # Get team seed information and tournament round if available
+    tournament_round = None
+    if isinstance(X_test, pd.DataFrame) and 'ExpectedRound' in X_test.columns:
+        tournament_round = X_test['ExpectedRound'].values
     
     # Use both seed differences and win rate differences for calibration
-    win_rate_diffs = X_test['WinRateDiff'].values if 'WinRateDiff' in X_test.columns else None
-
-    # Add this gender-specific code
-    # Women's tournament calibration values
+    win_rate_diffs = X_test['WinRateDiff'].values if isinstance(X_test, pd.DataFrame) and 'WinRateDiff' in X_test.columns else None
+    
+    # ======= Gender-specific calibration values based on analysis ========
     if gender == "women's":
-        # In women's tournament, higher seeds tend to win more frequently
-        seed_factors = {
-            'heavy_favorite_seed': 1.10,    # Boost predictions for heavy favorites
-            'favorite_seed': 1.08,
-            'slight_favorite_seed': 1.05,
-            'even_seed': 1.0,
-            'slight_underdog_seed': 0.92,
-            'underdog_seed': 0.85,
-            'heavy_underdog_seed': 0.80     # Significant reduction for heavy underdogs
+        # Women's tournament calibration values - MORE EXTREME FOR FAVORITES
+        round_factors = {
+            'Championship': {  # Women are very predictable in championship (80% accuracy)
+                'heavy_favorite': 1.25,  # Much more confident in heavy favorites
+                'favorite': 1.20,
+                'slight_favorite': 1.15,
+                'even': 1.0,
+                'slight_underdog': 0.85,
+                'underdog': 0.80,
+                'heavy_underdog': 0.75
+            },
+            'Final4': {  # Women's Final Four very unpredictable (33% accuracy)
+                'heavy_favorite': 0.95,  # Be conservative with favorites
+                'favorite': 0.92,
+                'slight_favorite': 0.90,
+                'even': 1.0,
+                'slight_underdog': 1.10,  # Boost underdogs
+                'underdog': 1.15,
+                'heavy_underdog': 1.20
+            },
+            'Round32': {  # Women's Round of 32 is good (60% accuracy)
+                'heavy_favorite': 1.15,
+                'favorite': 1.12,
+                'slight_favorite': 1.08,
+                'even': 1.0,
+                'slight_underdog': 0.90,
+                'underdog': 0.85,
+                'heavy_underdog': 0.80
+            },
+            'default': {  # Default factors for other rounds
+                'heavy_favorite': 1.12,
+                'favorite': 1.08,
+                'slight_favorite': 1.05,
+                'even': 1.0,
+                'slight_underdog': 0.92,
+                'underdog': 0.85,
+                'heavy_underdog': 0.80
+            }
         }
         
-        # Momentum has different effect in women's tournament
+        # Momentum factors
         momentum_factors = {
-            '_strong_form': 1.12,           # Recent performance matters more
-            '_good_form': 1.06,
-            '_neutral_form': 1.0,
-            '_poor_form': 0.95,
-            '_weak_form': 0.90
+            'strong_form': 1.12,
+            'good_form': 1.06,
+            'neutral_form': 1.0,
+            'poor_form': 0.95,
+            'weak_form': 0.90
         }
     else:
-        # Men's tournament calibration values (unchanged)
-        seed_factors = {
-            'heavy_favorite_seed': 1.05,
-            'favorite_seed': 1.03,
-            'slight_favorite_seed': 1.01,
-            'even_seed': 1.0,
-            'slight_underdog_seed': 0.98,
-            'underdog_seed': 0.97,
-            'heavy_underdog_seed': 0.95
+        # Men's tournament calibration values
+        round_factors = {
+            'Championship': {  # Men are predictable in championship (70% accuracy)
+                'heavy_favorite': 1.20,  # More confident in heavy favorites
+                'favorite': 1.15,
+                'slight_favorite': 1.10,
+                'even': 1.0,
+                'slight_underdog': 0.90,
+                'underdog': 0.85,
+                'heavy_underdog': 0.80
+            },
+            'Sweet16': {  # Men's Sweet 16 is very predictable (75% accuracy)
+                'heavy_favorite': 1.18,
+                'favorite': 1.15,
+                'slight_favorite': 1.10,
+                'even': 1.0,
+                'slight_underdog': 0.90,
+                'underdog': 0.85,
+                'heavy_underdog': 0.80
+            },
+            'Final4': {  # Men's Final Four is unpredictable (42% accuracy)
+                'heavy_favorite': 0.90,  # More doubt on favorites
+                'favorite': 0.95,
+                'slight_favorite': 0.98,
+                'even': 1.0,
+                'slight_underdog': 1.02,
+                'underdog': 1.05,
+                'heavy_underdog': 1.10   # Boost underdogs
+            },
+            'Elite8': {  # Men's Elite 8 is also unpredictable (42% accuracy)
+                'heavy_favorite': 0.92,
+                'favorite': 0.95,
+                'slight_favorite': 0.98,
+                'even': 1.0,
+                'slight_underdog': 1.02,
+                'underdog': 1.05,
+                'heavy_underdog': 1.08
+            },
+            'default': {  # Default factors for other rounds
+                'heavy_favorite': 1.10,
+                'favorite': 1.05,
+                'slight_favorite': 1.02,
+                'even': 1.0,
+                'slight_underdog': 0.98,
+                'underdog': 0.95,
+                'heavy_underdog': 0.90
+            }
         }
         
+        # Momentum factors
         momentum_factors = {
-            '_strong_form': 1.05,
-            '_good_form': 1.02,
-            '_neutral_form': 1.0,
-            '_poor_form': 0.98,
-            '_weak_form': 0.95
+            'strong_form': 1.08,
+            'good_form': 1.04,
+            'neutral_form': 1.0,
+            'poor_form': 0.96,
+            'weak_form': 0.92
         }
     
-    # Create segments based on both seed and win rate differences
+    # Create segments based on seed difference, round, and momentum
     segments = []
     for i in range(len(predictions)):
         seed_diff = seed_diffs[i]
         win_rate_diff = win_rate_diffs[i] if win_rate_diffs is not None else 0
         
-        # Determine segment - more fine-grained than before
+        # Determine segment based on seed difference
         if seed_diff <= -10:  # Heavy favorite by seed
-            segment = 'heavy_favorite_seed'
+            seed_segment = 'heavy_favorite'
         elif seed_diff <= -5:
-            segment = 'favorite_seed'
+            seed_segment = 'favorite'
         elif seed_diff <= -1:
-            segment = 'slight_favorite_seed'
+            seed_segment = 'slight_favorite'
         elif seed_diff < 1:
-            segment = 'even_seed'
+            seed_segment = 'even'
         elif seed_diff < 5:
-            segment = 'slight_underdog_seed'
+            seed_segment = 'slight_underdog'
         elif seed_diff < 10:
-            segment = 'underdog_seed'
+            seed_segment = 'underdog'
         else:
-            segment = 'heavy_underdog_seed'
+            seed_segment = 'heavy_underdog'
             
-        # Add win rate dimension
-        if win_rate_diff >= 0.2:
-            segment += '_strong_form'
-        elif win_rate_diff >= 0.1:
-            segment += '_good_form'
-        elif win_rate_diff <= -0.2:
-            segment += '_weak_form'
-        elif win_rate_diff <= -0.1:
-            segment += '_poor_form'
-        else:
-            segment += '_neutral_form'
-            
-        segments.append(segment)
-    
-    # Apply calibration based on segments
-    segment_calibrators = {}
-    
-    # If we have target values, train segment-specific calibrators
-    if 'Target' in X_test.columns and not X_test['Target'].isna().any():
-        targets = X_test['Target'].values
-        unique_segments = set(segments)
+        # Add round information if available
+        current_round = 'default'
+        if tournament_round is not None:
+            round_name = tournament_round[i]
+            if round_name in round_factors:
+                current_round = round_name
         
-        for segment in unique_segments:
-            mask = np.array(segments) == segment
-            if np.sum(mask) >= 10:  # Need enough samples
-                segment_probs = predictions[mask]
-                segment_targets = targets[mask]
-                
-                # Try logistic regression calibration first
-                try:
-                    lr_calibrator = LogisticRegression(C=1.0, solver='liblinear')
-                    lr_calibrator.fit(segment_probs.reshape(-1, 1), segment_targets)
-                    segment_calibrators[segment] = ('lr', lr_calibrator)
-                except:
-                    # Fall back to isotonic if logistic fails
-                    try:
-                        iso_calibrator = IsotonicRegression(out_of_bounds='clip')
-                        iso_calibrator.fit(segment_probs, segment_targets)
-                        segment_calibrators[segment] = ('iso', iso_calibrator)
-                    except:
-                        pass
+        # Add momentum dimension
+        if win_rate_diff >= 0.2:
+            momentum = 'strong_form'
+        elif win_rate_diff >= 0.1:
+            momentum = 'good_form'
+        elif win_rate_diff <= -0.2:
+            momentum = 'weak_form'
+        elif win_rate_diff <= -0.1:
+            momentum = 'poor_form'
+        else:
+            momentum = 'neutral_form'
+            
+        segments.append((seed_segment, current_round, momentum))
     
     # Apply calibration to each prediction
     for i in range(len(predictions)):
-        segment = segments[i]
-        if segment in segment_calibrators:
-            calib_type, calibrator = segment_calibrators[segment]
-            if calib_type == 'lr':
-                calibrated_preds[i] = calibrator.predict_proba(np.array([[predictions[i]]]))[0, 1]
-            else:
-                calibrated_preds[i] = calibrator.transform([predictions[i]])[0]
+        seed_segment, current_round, momentum = segments[i]
+        raw_pred = predictions[i]
+        
+        # Get calibration factors
+        round_factor = round_factors[current_round][seed_segment] if current_round in round_factors else round_factors['default'][seed_segment]
+        momentum_factor = momentum_factors[momentum]
+        
+        # Apply both factors
+        adjusted_pred = raw_pred * round_factor * momentum_factor
+        
+        # Apply bounded constraints based on segment to prevent extreme values
+        if seed_segment == 'heavy_favorite':
+            # Don't go below 0.55 for heavy favorites
+            calibrated_preds[i] = min(0.98, max(0.55, adjusted_pred))
+        elif seed_segment == 'favorite':
+            calibrated_preds[i] = min(0.95, max(0.50, adjusted_pred))
+        elif seed_segment == 'slight_favorite':
+            calibrated_preds[i] = min(0.90, max(0.45, adjusted_pred))
+        elif seed_segment == 'even':
+            # Keep closer to 0.5 for even matchups
+            calibrated_preds[i] = min(0.65, max(0.35, adjusted_pred))
+        elif seed_segment == 'slight_underdog':
+            calibrated_preds[i] = min(0.55, max(0.10, adjusted_pred))
+        elif seed_segment == 'underdog':
+            calibrated_preds[i] = min(0.50, max(0.05, adjusted_pred))
+        else:  # heavy underdog
+            # Don't go above 0.45 for heavy underdogs
+            calibrated_preds[i] = min(0.45, max(0.02, adjusted_pred))
+    
+    # Ensure all predictions are valid probabilities
+    calibrated_preds = np.clip(calibrated_preds, 0.001, 0.999)
+    
+    return calibrated_preds
+
+def calibrate_mens_predictions(predictions, X_test, seed_diff_col='SeedDiff'):
+    """
+    Advanced calibration specifically for men's tournament that addresses
+    the issues identified in multi-year analysis
+    
+    Args:
+        predictions: Raw prediction probabilities
+        X_test: Test features DataFrame
+        seed_diff_col: Column name for seed difference
+        
+    Returns:
+        Calibrated predictions
+    """
+    import numpy as np
+    import pandas as pd
+    from sklearn.preprocessing import PolynomialFeatures
+    from sklearn.linear_model import LogisticRegression
+    
+    calibrated_preds = np.copy(predictions)
+    seed_diffs = X_test[seed_diff_col].values if isinstance(X_test, pd.DataFrame) else X_test[:, seed_diff_col]
+    
+    # Get tournament round if available
+    tournament_round = None
+    if isinstance(X_test, pd.DataFrame) and 'ExpectedRound' in X_test.columns:
+        tournament_round = X_test['ExpectedRound'].values
+    
+    # Use additional context features if available
+    features = []
+    feature_names = ['WinRateDiff', 'OffEfficiencyDiff', 'DefEfficiencyDiff']
+    
+    for feat in feature_names:
+        if feat in X_test.columns:
+            features.append(X_test[feat].values)
+    
+    # Create segments based on seed difference and round
+    segments = []
+    
+    for i in range(len(predictions)):
+        seed_diff = seed_diffs[i]
+        
+        # Determine segment based on seed difference
+        if seed_diff <= -10:
+            seed_segment = 'heavy_favorite'
+        elif seed_diff <= -5:
+            seed_segment = 'favorite'
+        elif seed_diff <= -1:
+            seed_segment = 'slight_favorite'
+        elif seed_diff < 1:
+            seed_segment = 'even'
+        elif seed_diff < 5:
+            seed_segment = 'slight_underdog'
+        elif seed_diff < 10:
+            seed_segment = 'underdog'
         else:
-            # Apply default calibration based on segment
-            raw_pred = predictions[i]
-            if 'heavy_favorite' in segment:
-                if 'strong_form' in segment:
-                    calibrated_preds[i] = min(0.98, raw_pred * 1.05)
-                else:
-                    calibrated_preds[i] = min(0.95, raw_pred * 1.03)
-            elif 'favorite' in segment:
-                calibrated_preds[i] = min(0.92, raw_pred * 1.02)
-            elif 'slight_favorite' in segment:
-                calibrated_preds[i] = min(0.85, raw_pred * 1.01)
-            elif 'even' in segment:
-                # Keep closer to 0.5 for even matchups
-                calibrated_preds[i] = raw_pred * 0.95 + 0.025
-            elif 'slight_underdog' in segment:
-                calibrated_preds[i] = max(0.15, raw_pred * 0.98)
-            elif 'underdog' in segment:
-                calibrated_preds[i] = max(0.08, raw_pred * 0.97)
-            else:  # heavy underdog
-                calibrated_preds[i] = max(0.02, raw_pred * 0.95)
+            seed_segment = 'heavy_underdog'
+        
+        # Add round information if available
+        round_segment = 'unknown'
+        if tournament_round is not None:
+            round_segment = tournament_round[i]
+        
+        segments.append((seed_segment, round_segment))
+    
+    # Apply calibration based on our analysis
+    for i in range(len(predictions)):
+        seed_segment, round_segment = segments[i]
+        raw_pred = predictions[i]
+        
+        # Base multiplier for men's model - seed-specific
+        if seed_segment == 'heavy_favorite':
+            base_mult = 1.20  # Be more confident in heavy favorites
+        elif seed_segment == 'favorite':
+            base_mult = 1.12
+        elif seed_segment == 'slight_favorite':
+            base_mult = 1.08
+        elif seed_segment == 'even':
+            base_mult = 1.0
+        elif seed_segment == 'slight_underdog':
+            base_mult = 0.92
+        elif seed_segment == 'underdog':
+            base_mult = 0.88
+        else:  # heavy_underdog
+            base_mult = 0.83
+        
+        # Round-specific adjustments based on our analysis
+        if round_segment == 'Final4':
+            # Men's Final Four has just 41.7% accuracy - be more conservative with favorites
+            # and boost underdogs
+            if 'favorite' in seed_segment:
+                round_mult = 0.85  # Reduce confidence in favorites
+            elif 'underdog' in seed_segment:
+                round_mult = 1.15  # Boost confidence in underdogs
+            else:
+                round_mult = 1.0
+        elif round_segment == 'Elite8':
+            # Men's Elite 8 has just 58.3% accuracy
+            if 'favorite' in seed_segment:
+                round_mult = 0.90
+            elif 'underdog' in seed_segment:
+                round_mult = 1.10
+            else:
+                round_mult = 1.0
+        elif round_segment == 'Championship':
+            # Men's championship games are 60% accurate - boost favorites
+            if 'favorite' in seed_segment:
+                round_mult = 1.15
+            else:
+                round_mult = 0.95
+        elif round_segment == 'Round64':
+            # Men's Round64 is good at 64.8% - be more confident
+            if 'favorite' in seed_segment:
+                round_mult = 1.10
+            else:
+                round_mult = 0.90
+        else:
+            round_mult = 1.0
+        
+        # Confidence factor - be more aggressive with extreme predictions
+        if raw_pred >= 0.8 or raw_pred <= 0.2:
+            # Current high-confidence predictions are 83.3% accurate
+            # Be even more confident
+            conf_mult = 1.10
+        elif raw_pred >= 0.7 or raw_pred <= 0.3:
+            conf_mult = 1.05
+        else:
+            conf_mult = 1.0
+        
+        # Apply all multipliers
+        adjusted_pred = raw_pred * base_mult * round_mult * conf_mult
+        
+        # Apply bounds based on segment to prevent extreme values
+        if seed_segment == 'heavy_favorite':
+            # Don't go below 0.7 for heavy favorites
+            calibrated_preds[i] = min(0.98, max(0.7, adjusted_pred))
+        elif seed_segment == 'favorite':
+            calibrated_preds[i] = min(0.95, max(0.65, adjusted_pred))
+        elif seed_segment == 'slight_favorite':
+            calibrated_preds[i] = min(0.9, max(0.6, adjusted_pred))
+        elif seed_segment == 'even':
+            # Keep closer to 0.5 for even matchups but allow more variation
+            calibrated_preds[i] = min(0.7, max(0.3, adjusted_pred))
+        elif seed_segment == 'slight_underdog':
+            calibrated_preds[i] = min(0.4, max(0.1, adjusted_pred))
+        elif seed_segment == 'underdog':
+            calibrated_preds[i] = min(0.35, max(0.05, adjusted_pred))
+        else:  # heavy_underdog
+            # Don't go above 0.3 for heavy underdogs
+            calibrated_preds[i] = min(0.3, max(0.02, adjusted_pred))
     
     # Ensure all predictions are valid probabilities
     calibrated_preds = np.clip(calibrated_preds, 0.001, 0.999)
@@ -459,6 +664,149 @@ def evaluate_predictions_by_tournament_round(predictions_df, actual_results_df, 
             'LogLoss': log_loss(x['Correct'].astype(int), x['PredictedProb']),
             'AvgConfidence': x['Confidence'].mean()
         })).reset_index()
+        
+        print(f"\n===== {gender.capitalize()} Tournament Prediction Evaluation by Round =====")
+        print(f"Matched {len(results_df)} games from actual tournament results")
+        print("\nMetrics by Round:")
+        print(round_metrics.to_string(index=False))
+        
+        # Analyze upset metrics
+        results_df['WSeedNum'] = results_df['WSeed'].apply(lambda x: int(x[1:3]) if isinstance(x, str) and len(x) >= 3 else 0)
+        results_df['LSeedNum'] = results_df['LSeed'].apply(lambda x: int(x[1:3]) if isinstance(x, str) and len(x) >= 3 else 0) 
+        results_df['Upset'] = results_df['WSeedNum'] > results_df['LSeedNum']
+        
+        # Accuracy on upsets vs. non-upsets
+        upset_games = results_df[results_df['Upset']]
+        non_upset_games = results_df[~results_df['Upset']]
+        
+        print("\nUpset Detection:")
+        print(f"  Total Upsets: {len(upset_games)} ({len(upset_games)/len(results_df)*100:.1f}%)")
+        if len(upset_games) > 0:
+            print(f"  Accuracy on Upsets: {upset_games['Correct'].mean():.4f}")
+        print(f"  Accuracy on Non-Upsets: {non_upset_games['Correct'].mean():.4f}")
+        
+        return {
+            'round_metrics': round_metrics,
+            'results_df': results_df
+        }
+    else:
+        print(f"No matching predictions found for {gender} tournaments")
+        return None
+
+def evaluate_predictions_by_tournament_round(predictions_df, actual_results_df, seed_data, gender="men's"):
+    """
+    Evaluate prediction accuracy by tournament round
+    """
+    # Create a copy of the actual results for processing
+    actual_games = actual_results_df.copy()
+    
+    # Merge with seed data
+    actual_games = actual_games.merge(
+        seed_data.rename(columns={'TeamID': 'WTeamID', 'Seed': 'WSeed'}),
+        on=['Season', 'WTeamID'],
+        how='left'
+    )
+    
+    actual_games = actual_games.merge(
+        seed_data.rename(columns={'TeamID': 'LTeamID', 'Seed': 'LSeed'}),
+        on=['Season', 'LTeamID'],
+        how='left'
+    )
+    
+    # Create a unique ID for each matchup in the actual results
+    actual_games['MatchupID'] = actual_games.apply(
+        lambda row: f"{row['Season']}_{min(row['WTeamID'], row['LTeamID'])}_{max(row['WTeamID'], row['LTeamID'])}",
+        axis=1
+    )
+    
+    # Determine the round for each game
+    round_mapping = {
+        134: 'Round64', 135: 'Round64', 136: 'Round64', 137: 'Round64',
+        138: 'Round32', 139: 'Round32',
+        140: 'Sweet16', 141: 'Sweet16',
+        142: 'Elite8', 143: 'Elite8',
+        144: 'Final4',
+        146: 'Championship'
+    }
+    
+    actual_games['Round'] = actual_games['DayNum'].map(round_mapping)
+    
+    # Match predictions with actual games and track by round
+    matched_predictions = []
+    
+    for _, game in actual_games.iterrows():
+        season = game['Season']
+        matchup_id = game['MatchupID']
+        
+        # Find this matchup in our predictions
+        prediction = predictions_df[predictions_df['MatchupID'] == matchup_id]
+        
+        if len(prediction) > 0:
+            # Get the prediction row
+            pred_row = prediction.iloc[0]
+            
+            # Determine if team1 was the winner
+            team1_id = pred_row['Team1ID']
+            team2_id = pred_row['Team2ID']
+            team1_won = (game['WTeamID'] == team1_id)
+            
+            # Get the predicted probability
+            predicted_prob = pred_row['Pred'] if team1_won else (1 - pred_row['Pred'])
+            
+            matched_predictions.append({
+                'Season': season,
+                'MatchupID': matchup_id,
+                'Round': game['Round'],
+                'WTeamID': game['WTeamID'],
+                'LTeamID': game['LTeamID'],
+                'WSeed': game['WSeed'],
+                'LSeed': game['LSeed'],
+                'PredictedProb': predicted_prob,
+                'Correct': (predicted_prob > 0.5),
+                'Confidence': abs(predicted_prob - 0.5) * 2  # Scale 0-1, where 1 is highest confidence
+            })
+    
+    # Convert to DataFrame and analyze by round
+    if matched_predictions:
+        results_df = pd.DataFrame(matched_predictions)
+        
+        # Initialize an empty DataFrame for round metrics
+        round_metrics_list = []
+        
+        # Calculate metrics by round manually instead of using groupby with lambda
+        for round_name, round_group in results_df.groupby('Round'):
+            correct = round_group['Correct'].astype(int)
+            predicted = round_group['PredictedProb']
+            
+            # Calculate Brier score
+            brier = brier_score_loss(correct, predicted)
+            
+            # Calculate Log Loss safely with error handling
+            try:
+                logloss = log_loss(correct, predicted)
+            except ValueError as e:
+                # If all predictions are the same class
+                if "y_true contains only one label" in str(e):
+                    # If all are correct (all 1's), log_loss should be close to 0
+                    # If all are incorrect (all 0's), log_loss should be a high value
+                    if correct.mean() == 1.0:  # All correct
+                        logloss = 0.001  # Near perfect score
+                    else:  # All incorrect
+                        logloss = 15.0  # Very bad score
+                else:
+                    # For other errors, just use a default value
+                    logloss = float('nan')
+            
+            round_metrics_list.append({
+                'Round': round_name,
+                'Count': len(round_group),
+                'Accuracy': round_group['Correct'].mean(),
+                'Brier': brier,
+                'LogLoss': logloss,
+                'AvgConfidence': round_group['Confidence'].mean()
+            })
+        
+        round_metrics = pd.DataFrame(round_metrics_list)
         
         print(f"\n===== {gender.capitalize()} Tournament Prediction Evaluation by Round =====")
         print(f"Matched {len(results_df)} games from actual tournament results")
