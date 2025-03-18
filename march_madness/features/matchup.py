@@ -1199,3 +1199,42 @@ def create_seed_based_trend_features(all_teams, seed_data, season):
         })
 
     return pd.DataFrame(results)
+
+def create_upset_specific_features(X, gender="men's"):
+    """
+    Create features specifically designed to detect upset potential
+    
+    Args:
+        X: Feature DataFrame
+        gender: 'men's' or 'women's' 
+        
+    Returns:
+        Enhanced feature DataFrame
+    """
+    import numpy as np
+    
+    X_enhanced = X.copy()
+    
+    # Add features that correlate with historical upsets
+    if gender == "men's":
+        # Men's tournament upset indicators
+        if 'Team1FG3Pct' in X.columns and 'Team2FG3Pct' in X.columns and 'SeedDiff' in X.columns:
+            X_enhanced['ThreePointUpsetFactor'] = (X['Team1FG3Pct'] - X['Team2FG3Pct']) * X['SeedDiff']
+        
+        if all(col in X.columns for col in ['Team1Stl', 'Team1Blk', 'Team2Stl', 'Team2Blk']):
+            X_enhanced['DefensiveDisruptionFactor'] = (X['Team1Stl'] * X['Team1Blk']) / (X['Team2Stl'] * X['Team2Blk'] + 0.001)
+        
+        if 'Team1WinRate_Last10' in X.columns and 'SeedDiff' in X.columns:
+            X_enhanced['MomentumVsSeedGap'] = X['Team1WinRate_Last10'] / (abs(X['SeedDiff']) + 1)
+        
+        # Add non-linear seed difference transformations
+        if 'SeedDiff' in X.columns:
+            X_enhanced['SeedDiffLog'] = np.log(abs(X['SeedDiff']) + 1) * np.sign(X['SeedDiff'])
+            X_enhanced['SeedDiffSquared'] = X['SeedDiff'] ** 2 * np.sign(X['SeedDiff'])
+        
+        # Final Four specific features
+        if all(col in X.columns for col in ['Team1TourneyAppearances', 'Team2TourneyAppearances', 'Team1TournamentReadiness']):
+            tournament_experience_factor = (X['Team1TourneyAppearances'] - X['Team2TourneyAppearances']) / 10
+            X_enhanced['FinalFourReadiness'] = X['Team1TournamentReadiness'] - tournament_experience_factor
+    
+    return X_enhanced

@@ -2,12 +2,17 @@
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
 from xgboost import XGBClassifier
+from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
+from march_madness.utils.data_access import get_data_with_index
+from march_madness.data.loaders import filter_data_dict_by_seasons
+from march_madness.models.evaluation import validate_model
 
 def prepare_tournament_data_for_training(tourney_results, features_df, test_seasons=None):
     """
@@ -129,122 +134,6 @@ def prepare_tournament_data_for_training(tourney_results, features_df, test_seas
 
     return X_train_scaled, X_test_scaled, y_train, y_test, X_train, X_test, scaler, feature_cols
 
-
-def create_feature_interactions(X, important_features=None, max_degree=2):
-    """
-    Create meaningful feature interactions
-
-    Args:
-        X: DataFrame with features
-        important_features: List of most important feature names
-        max_degree: Maximum degree for interactions
-
-    Returns:
-        DataFrame with original features and interactions
-    """
-    # Start with the original data
-    X_enhanced = X.copy()
-
-    # If no important features provided, use all features
-    if important_features is None:
-        important_features = X.columns.tolist()
-
-    # Select top features for interactions (to avoid explosion of features)
-    if len(important_features) > 30:
-        interaction_features = important_features[:30]
-    else:
-        interaction_features = important_features
-
-    # Create interaction terms for pairs of important features
-    for i, feat1 in enumerate(interaction_features):
-        if feat1 not in X.columns:
-            continue
-
-        # 1. Create squared terms for certain features (non-binary features)
-        if X[feat1].nunique() > 2:
-            feat_name = f"{feat1}_squared"
-            X_enhanced[feat_name] = X[feat1] ** 2
-
-        # 2. Create interaction terms with other important features
-        for j in range(i+1, len(interaction_features)):
-            feat2 = interaction_features[j]
-
-            if feat2 not in X.columns:
-                continue
-
-            feat_name = f"{feat1}_x_{feat2}"
-            X_enhanced[feat_name] = X[feat1] * X[feat2]
-
-    # Create specific basketball-relevant interactions
-
-    # Efficiency interactions
-    if all(f in X.columns for f in ['Team1OffEfficiency', 'Team2DefEfficiency']):
-        X_enhanced['Team1Off_vs_Team2Def'] = X['Team1OffEfficiency'] / X['Team2DefEfficiency']
-
-    if all(f in X.columns for f in ['Team2OffEfficiency', 'Team1DefEfficiency']):
-        X_enhanced['Team2Off_vs_Team1Def'] = X['Team2OffEfficiency'] / X['Team1DefEfficiency']
-
-    # Seed interactions with other factors
-    if all(f in X.columns for f in ['SeedDiff', 'WinRateDiff']):
-        X_enhanced['SeedDiff_x_WinRateDiff'] = X['SeedDiff'] * X['WinRateDiff']
-
-    if all(f in X.columns for f in ['SeedDiff', 'SOSPercentileDiff']):
-        X_enhanced['SeedDiff_x_SOSDiff'] = X['SeedDiff'] * X['SOSPercentileDiff']
-
-    # Experience interactions
-    if all(f in X.columns for f in ['TourneyAppearancesDiff', 'SeedDiff']):
-        X_enhanced['SeedDiff_x_ExperienceDiff'] = X['SeedDiff'] * X['TourneyAppearancesDiff']
-
-    # Tournament readiness interaction with seed
-    if all(f in X.columns for f in ['Team1TournamentReadiness', 'Team2TournamentReadiness', 'SeedDiff']):
-        X_enhanced['TournamentReadiness_x_SeedDiff'] = (X['Team1TournamentReadiness'] - X['Team2TournamentReadiness']) * X['SeedDiff']
-    
-    # Conference strength interactions
-    if all(f in X.columns for f in ['Team1ConfWinRate', 'Team2ConfWinRate', 'SeedDiff']):
-        X_enhanced['ConfStrength_x_SeedDiff'] = (X['Team1ConfWinRate'] - X['Team2ConfWinRate']) * X['SeedDiff']
-    
-    # Momentum and consistency features
-    if all(f in X.columns for f in ['Team1WinRate_Last5', 'Team2WinRate_Last5', 'Team1ScoreConsistency', 'Team2ScoreConsistency']):
-        X_enhanced['RecentForm_x_Consistency'] = (X['Team1WinRate_Last5'] - X['Team2WinRate_Last5']) / \
-                                               (X['Team1ScoreConsistency'] + X['Team2ScoreConsistency'] + 0.01)
-    
-    # Coach experience weighted by tournament pressures
-    if all(f in X.columns for f in ['Team1CoachTourneyExp', 'Team2CoachTourneyExp', 'Team1PressureScore', 'Team2PressureScore']):
-        X_enhanced['CoachExp_x_Pressure'] = (X['Team1CoachTourneyExp'] * X['Team1PressureScore'] - 
-                                           X['Team2CoachTourneyExp'] * X['Team2PressureScore'])
-
-    # Handle potential division by zero issues
-    for col in X_enhanced.columns:
-        if col not in X.columns:  # Only process new columns
-            X_enhanced[col] = X_enhanced[col].replace([np.inf, -np.inf], np.nan).fillna(0)
-
-    return X_enhanced
-
-def drop_redundant_features(X, threshold=0.95):
-    """
-    Drop highly correlated features to reduce multicollinearity
-
-    Args:
-        X: DataFrame with features
-        threshold: Correlation threshold for dropping
-
-    Returns:
-        DataFrame with reduced features
-    """
-    # Calculate correlation matrix
-    corr_matrix = X.corr().abs()
-
-    # Select upper triangle of correlation matrix
-    upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-
-    # Find features with correlation greater than threshold
-    to_drop = [column for column in upper.columns if any(upper[column] > threshold)]
-
-    # Drop highly correlated features
-    X_reduced = X.drop(to_drop, axis=1)
-
-    return X_reduced, to_drop
-
 def handle_class_imbalance(X_train, y_train, method='combined', random_state=42):
     """
     Handle class imbalance in the training data
@@ -361,3 +250,429 @@ def train_ensemble_model(X_train, y_train, random_state=42):
     ensemble.fit(X_train, y_train)
 
     return ensemble
+
+def gender_specific_feature_selection(X, y, gender, importance_threshold=0.01):
+    """
+    Select features using a gender-specific approach combining importance scores
+    with domain knowledge about basketball differences.
+    
+    Args:
+        X: Feature DataFrame
+        y: Target values
+        gender: 'men' or 'women'
+        importance_threshold: Minimum importance threshold (different by gender)
+    
+    Returns:
+        Selected feature names
+    """
+    # Initial feature selection using XGBoost importance
+    model = XGBClassifier(n_estimators=100, random_state=42)
+    model.fit(X, y)
+    
+    # Get feature importances
+    importances = model.feature_importances_
+    feature_importance = pd.DataFrame({
+        'feature': X.columns,
+        'importance': importances
+    }).sort_values('importance', ascending=False)
+    
+    # Adjust threshold by gender
+    if gender == "women's":
+        # Women's tournaments show more predictable patterns, can be more selective
+        adjusted_threshold = importance_threshold * 1.2
+    else:
+        # Men's tournaments need more features to capture variability
+        adjusted_threshold = importance_threshold * 0.8
+    
+    # Filter by importance
+    selected_features = feature_importance[feature_importance['importance'] > adjusted_threshold]['feature'].tolist()
+    
+    # Add gender-specific "must-include" features
+    if gender == "women's":
+        must_include = [
+            # Women's game features with known importance
+            'Team1FGPct', 'Team2FGPct', 'FGPctDiff',  # Overall shooting efficiency critical
+            'OffEfficiencyDiff',       # Offensive efficiency differential 
+            'Team1ASTtoTOV', 'Team2ASTtoTOV', # Ball control metrics
+            'Womens_ScoringDist_2pt', 'Womens_ScoringDist_3pt', # Scoring distribution
+            'Womens_AstToFGM',       # Team ball movement
+        ]
+    else:
+        must_include = [
+            # Men's game features with known importance
+            'Team1DefEfficiency', 'Team2DefEfficiency', 'DefEfficiencyDiff', # Defense critical
+            'Team1FG3Pct', 'Team2FG3Pct', # 3-point shooting crucial
+            'Team1PressureScore', 'Team2PressureScore', # Performance under pressure
+            'TourneyAppearancesDiff',  # Tournament experience
+            'Team1RoundWinRate', 'Team2RoundWinRate', # Round-specific performance
+        ]
+    
+    # Ensure must-include features are in the selection
+    for feature in must_include:
+        if feature in X.columns and feature not in selected_features:
+            selected_features.append(feature)
+    
+    # Always include these fundamental features regardless of gender
+    core_features = ['SeedDiff', 'Team1Seed', 'Team2Seed', 'WinRateDiff', 'NetEfficiencyDiff']
+    for feature in core_features:
+        if feature in X.columns and feature not in selected_features:
+            selected_features.append(feature)
+    
+    return selected_features
+
+def time_based_cross_validation(data_dict, gender, feature_engineering_func, model_training_func):
+    """
+    Perform time-based cross-validation for tournament predictions
+    
+    Args:
+        data_dict: Dictionary with all loaded data
+        gender: 'men' or 'women'
+        feature_engineering_func: Function to engineer features
+        model_training_func: Function to train the model
+        
+    Returns:
+        Cross-validation results and best model
+    """
+    # Define all seasons from 2010-2019 (excluding prediction seasons)
+    all_seasons = list(range(2010, 2020))
+    
+    # We'll use rolling window validation with expanding training set
+    cv_results = []
+    
+    # Start with minimum training size of 3 seasons
+    min_train_seasons = 3
+    
+    for i in range(min_train_seasons, len(all_seasons)):
+        # Training seasons are all seasons up to validation season
+        train_seasons = all_seasons[:i]
+        # Validation season is the next season
+        val_season = all_seasons[i]
+        
+        print(f"CV fold {i-min_train_seasons+1}: Training on {train_seasons}, validating on {val_season}")
+        
+        # Prepare training data
+        train_data = filter_data_dict_by_seasons(data_dict, train_seasons)
+        train_features = feature_engineering_func(train_data, gender, train_seasons)
+        
+        # Prepare validation data
+        val_data = filter_data_dict_by_seasons(data_dict, [val_season])
+        val_features = feature_engineering_func(val_data, gender, [val_season])
+        
+        # Train model using the gender-specific training function
+        model, feature_cols, scaler, dropped_features = model_training_func(
+            train_features, gender, train_seasons, None, []
+        )
+        
+        # Validate model
+        val_metrics = validate_model(
+            model, val_features, feature_cols, scaler, dropped_features, gender, val_season
+        )
+        
+        if val_metrics:
+            cv_results.append({
+                'train_seasons': train_seasons,
+                'val_season': val_season,
+                'brier_score': val_metrics['brier_score'],
+                'log_loss': val_metrics['log_loss'],
+                'auc': val_metrics['auc']
+            })
+    
+    # Find best model configuration based on Brier score
+    if cv_results:
+        cv_df = pd.DataFrame(cv_results)
+        best_idx = cv_df['brier_score'].argmin()
+        best_config = cv_results[best_idx]
+        
+        print(f"Best CV configuration: train on {best_config['train_seasons']}, " 
+              f"validate on {best_config['val_season']}")
+        print(f"Brier Score: {best_config['brier_score']:.4f}, "
+              f"Log Loss: {best_config['log_loss']:.4f}, "
+              f"AUC: {best_config['auc']:.4f}")
+        
+        # Train final model on all data
+        all_data = filter_data_dict_by_seasons(data_dict, all_seasons)
+        all_features = feature_engineering_func(all_data, gender, all_seasons)
+        
+        final_model, feature_cols, scaler, dropped_features = model_training_func(
+            all_features, gender, all_seasons, None, []
+        )
+        
+        return {
+            'cv_results': cv_df,
+            'model': final_model,
+            'feature_cols': feature_cols,
+            'scaler': scaler,
+            'dropped_features': dropped_features
+        }
+    else:
+        print("Cross-validation failed - no results")
+        return None
+
+def time_based_cross_validation(data_dict, gender, feature_engineering_func, model_training_func):
+    """
+    Perform time-based cross-validation for tournament predictions
+    
+    Args:
+        data_dict: Dictionary with all loaded data
+        gender: 'men' or 'women'
+        feature_engineering_func: Function to engineer features
+        model_training_func: Function to train the model
+        
+    Returns:
+        Cross-validation results and best model
+    """
+    # Define all seasons from 2010-2019 (excluding prediction seasons)
+    all_seasons = list(range(2010, 2020))
+    
+    # We'll use rolling window validation with expanding training set
+    cv_results = []
+    
+    # Start with minimum training size of 3 seasons
+    min_train_seasons = 3
+    
+    # Get tournament data from modeling_data
+    tourney_data = data_dict.get('tourney_data', pd.DataFrame())
+    if tourney_data.empty:
+        print("ERROR: No tournament data available for cross-validation")
+        return None
+    
+    # Get all available seasons from matchup data
+    available_seasons = []
+    season_matchups = data_dict.get('season_matchups', {})
+    for season in season_matchups:
+        try:
+            available_seasons.append(int(season))
+        except (ValueError, TypeError):
+            continue
+    
+    available_seasons = sorted(available_seasons)
+    print(f"Available seasons for CV: {available_seasons}")
+    
+    for i in range(min_train_seasons, len(available_seasons)):
+        # Training seasons are all seasons up to validation season
+        train_seasons = available_seasons[:i]
+        # Validation season is the next season
+        val_season = available_seasons[i]
+        
+        print(f"CV fold {i-min_train_seasons+1}: Training on {train_seasons}, validating on {val_season}")
+        
+        # Filter tournament results for training
+        train_tourney = tourney_data[tourney_data['Season'].isin(train_seasons)]
+        
+        # Create training features using modeling_data
+        train_features = {}
+        for season in train_seasons:
+            if season in season_matchups:
+                train_features[season] = season_matchups[season]
+        
+        # Validate model on the next season
+        val_results = None
+        if val_season in season_matchups:
+            # Get validation features
+            val_features = season_matchups[val_season]
+            
+            # Get actual tournament results for this season
+            val_tourney = tourney_data[tourney_data['Season'] == val_season]
+            
+            if not val_tourney.empty:
+                # Now we can evaluate our model on this season
+                # We'll need to implement a simplified version of train_and_predict_model here
+                # that doesn't require the original raw data_dict
+                pass
+    
+    # Find best model configuration based on Brier score
+    if cv_results:
+        cv_df = pd.DataFrame(cv_results)
+        best_idx = cv_df['brier_score'].argmin()
+        best_config = cv_results[best_idx]
+        
+        print(f"Best CV configuration: train on {best_config['train_seasons']}, " 
+              f"validate on {best_config['val_season']}")
+        print(f"Brier Score: {best_config['brier_score']:.4f}, "
+              f"Log Loss: {best_config['log_loss']:.4f}, "
+              f"AUC: {best_config['auc']:.4f}")
+        
+        # Train final model on all data
+        all_data = filter_data_dict_by_seasons(data_dict, all_seasons)
+        all_features = feature_engineering_func(all_data, gender, all_seasons)
+        
+        final_model, feature_cols, scaler, dropped_features = model_training_func(
+            all_features, gender, all_seasons, None, []
+        )
+        
+        return {
+            'cv_results': cv_df,
+            'model': final_model,
+            'feature_cols': feature_cols,
+            'scaler': scaler,
+            'dropped_features': dropped_features
+        }
+    else:
+        print("Cross-validation failed - no results")
+        return None
+
+def create_mens_specific_model(random_state=3):
+    # Add an SVM classifier specifically for upset detection
+    upset_svm = SVC(
+        C=1.0,
+        kernel='rbf',
+        probability=True,
+        class_weight={0: 1, 1: 3},  # Heavily favor underdogs
+        random_state=random_state
+    )
+    
+    # Add a gradient boosting classifier with class weights
+    gb_model = GradientBoostingClassifier(
+        n_estimators=300,
+        learning_rate=0.05,
+        max_depth=4,
+        subsample=0.8,
+        random_state=random_state
+    )
+    
+    # Modify XGBoost to focus more on upsets
+    xgb_model = XGBClassifier(
+        n_estimators=800,
+        learning_rate=0.03,
+        max_depth=4,
+        subsample=0.8,
+        colsample_bytree=0.7,
+        gamma=0.2,
+        reg_alpha=0.2,
+        reg_lambda=1.5,
+        min_child_weight=3,
+        scale_pos_weight=2.5,  # Increase focus on minority class (upsets)
+        random_state=random_state
+    )
+    
+    # More balanced ensemble weights
+    return VotingClassifier(
+        estimators=[
+            ('xgb', xgb_model),
+            ('gb', gb_model),
+            ('svm', upset_svm),
+            ('rf', RandomForestClassifier(
+                n_estimators=500,
+                max_depth=8,
+                min_samples_split=4,
+                class_weight='balanced_subsample',
+                random_state=random_state
+            ))
+        ],
+        voting='soft',
+        weights=[0.35, 0.25, 0.2, 0.2]  # Give more weight to upset-focused models
+    )
+
+def create_womens_specific_model(random_state=3):
+    # XGBoost configured for women's tournament patterns
+        xgb_model = XGBClassifier(
+            n_estimators=500,
+            learning_rate=0.05,
+            max_depth=5,    # Slightly deeper trees to capture stronger patterns
+            subsample=0.85,
+            colsample_bytree=0.75,
+            gamma=0.15,
+            reg_alpha=0.25,
+            reg_lambda=1.0,
+            min_child_weight=2,
+            scale_pos_weight=1.0,
+            random_state=random_state
+        )
+        
+        # LightGBM with women's-specific parameters
+        lgb_model = LGBMClassifier(
+            n_estimators=500,
+            learning_rate=0.05,
+            max_depth=6,     # Deeper trees to capture stronger patterns
+            num_leaves=32,
+            subsample=0.7,
+            colsample_bytree=0.7,
+            reg_alpha=0.15,
+            reg_lambda=1.2,
+            min_child_samples=15,
+            class_weight='balanced',
+            random_state=random_state
+        )
+        
+        # Random Forest - more trees, deeper
+        rf_model = RandomForestClassifier(
+            n_estimators=400,
+            max_depth=10,
+            min_samples_split=8,
+            min_samples_leaf=4,
+            max_features='sqrt',
+            class_weight='balanced',
+            random_state=random_state,
+            n_jobs=-1
+        )
+        
+        # Linear model for capturing direct relationships
+        logistic_model = LogisticRegression(
+            C=0.9,
+            class_weight='balanced',
+            solver='liblinear',
+            random_state=random_state
+        )
+        
+        # Create ensemble with women's-specific weights
+        # Give more weight to XGBoost which handles strong feature signals well
+        return VotingClassifier(
+            estimators=[
+                ('xgb', xgb_model),
+                ('lgb', lgb_model),
+                ('rf', rf_model),
+                ('lr', logistic_model)
+            ],
+            voting='soft',
+            weights=[0.45, 0.25, 0.15, 0.15]
+        )
+
+def train_round_specific_models(X_train, y_train, tournament_rounds, gender):
+    """Train separate models for specific tournament rounds"""
+    
+    round_models = {}
+    
+    for round_name in tournament_rounds:
+        print(f"Training specialized model for {round_name}...")
+        
+        # Filter training data for this round
+        round_mask = X_train['ExpectedRound'] == round_name
+        if sum(round_mask) < 10:  # Need minimum examples
+            print(f"Insufficient data for {round_name}, using general model")
+            continue
+            
+        X_round = X_train[round_mask]
+        y_round = y_train[round_mask]
+        
+        if round_name == 'Final4' and gender == "women's":
+            # Custom model for women's Final Four
+            model = RandomForestClassifier(
+                n_estimators=300,
+                max_depth=5,
+                min_samples_split=3,
+                class_weight='balanced',
+                random_state=42
+            )
+        elif round_name == 'Elite8' and gender == "men's":
+            # Custom model for men's Elite 8
+            model = XGBClassifier(
+                n_estimators=500,
+                learning_rate=0.05,
+                max_depth=3,
+                subsample=0.9,
+                random_state=42
+            )
+        else:
+            # Default round-specific model
+            model = LogisticRegression(
+                C=0.8,
+                class_weight='balanced',
+                solver='liblinear',
+                random_state=42
+            )
+            
+        # Train and store model
+        model.fit(X_round, y_round)
+        round_models[round_name] = model
+        
+    return round_models

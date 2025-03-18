@@ -5,7 +5,7 @@ from sklearn.calibration import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, roc_auc_score, log_loss
 from ..features.matchup import create_tournament_prediction_dataset
-from ..models.training import create_feature_interactions
+from ..models.common import create_feature_interactions
 
 
 def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff', gender=None):

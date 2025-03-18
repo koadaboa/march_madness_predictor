@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# Script to generate predictions
 import os
 import pandas as pd
 import numpy as np
@@ -12,44 +10,55 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from march_madness.config import (STARTING_SEASON, CURRENT_SEASON, 
                                  TRAINING_SEASONS, VALIDATION_SEASON, 
                                  PREDICTION_SEASONS)
-from march_madness.data.loaders import (load_mens_data, load_womens_data, 
-                                       filter_data_dict_by_seasons)
-from march_madness.utils.helpers import prepare_modeling_data, train_and_predict_model
+from march_madness.data.loaders import load_mens_data, load_womens_data
+from march_madness.utils.data_processors import load_or_prepare_modeling_data
+from march_madness.utils.helpers import train_and_predict_model
 from march_madness.models.prediction import combine_predictions
 from march_madness.models.evaluation import evaluate_predictions_against_actual, evaluate_predictions_by_tournament_round
 
 def main():
     print("Generating NCAA Basketball Tournament Predictions")
     
-    # Load prediction data
-    mens_predict_data = filter_data_dict_by_seasons(
-        load_mens_data(STARTING_SEASON), 
-        PREDICTION_SEASONS
+    # Define directories
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(project_root, 'data')
+    cache_dir = os.path.join(project_root, 'cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Parse command line arguments
+    import argparse
+    parser = argparse.ArgumentParser(description='Generate March Madness predictions')
+    parser.add_argument('--skip-data-load', action='store_true', 
+                        help='Skip loading raw data (assume modeling data is cached)')
+    parser.add_argument('--force-prepare', action='store_true',
+                        help='Force data preparation even if cache exists')
+    args = parser.parse_args()
+    
+    # Load or prepare modeling data
+    if args.skip_data_load:
+        print("Skipping raw data loading, using cached modeling data...")
+        mens_data = womens_data = None
+    else:
+        # Load raw data (only needed if cache doesn't exist or force_prepare=True)
+        print("Loading raw data...")
+        mens_data = load_mens_data(STARTING_SEASON, data_dir=data_dir)
+        womens_data = load_womens_data(STARTING_SEASON, data_dir=data_dir)
+    
+    # Get modeling data (from cache if available, or process it)
+    print("Getting modeling data for men's tournament...")
+    mens_modeling_data = load_or_prepare_modeling_data(
+        mens_data, "men's", STARTING_SEASON, CURRENT_SEASON, 
+        PREDICTION_SEASONS,
+        cache_dir=cache_dir,
+        force_prepare=args.force_prepare
     )
     
-    womens_predict_data = filter_data_dict_by_seasons(
-        load_womens_data(STARTING_SEASON), 
-        PREDICTION_SEASONS
-    )
-    
-    # Ensure prediction data does not contain tournament results
-    if 'df_tourney' in mens_predict_data:
-        mens_predict_data['df_tourney'] = pd.DataFrame(columns=mens_predict_data['df_tourney'].columns)
-    
-    if 'df_tourney' in womens_predict_data:
-        womens_predict_data['df_tourney'] = pd.DataFrame(columns=womens_predict_data['df_tourney'].columns)
-    
-    # Prepare prediction data
-    print("Preparing Men's prediction data...")
-    mens_prediction_data = prepare_modeling_data(
-        mens_predict_data, "men's", STARTING_SEASON, CURRENT_SEASON, 
-        PREDICTION_SEASONS
-    )
-    
-    print("Preparing Women's prediction data...")
-    womens_prediction_data = prepare_modeling_data(
-        womens_predict_data, "women's", STARTING_SEASON, CURRENT_SEASON, 
-        PREDICTION_SEASONS
+    print("Getting modeling data for women's tournament...")
+    womens_modeling_data = load_or_prepare_modeling_data(
+        womens_data, "women's", STARTING_SEASON, CURRENT_SEASON, 
+        PREDICTION_SEASONS,
+        cache_dir=cache_dir,
+        force_prepare=args.force_prepare
     )
     
     # Load trained models and metadata
@@ -68,7 +77,7 @@ def main():
     # Generate predictions
     print("Generating Men's predictions...")
     mens_predictions = train_and_predict_model(
-        mens_prediction_data, "men's", [], None, PREDICTION_SEASONS,
+        mens_modeling_data, "men's", [], None, PREDICTION_SEASONS,
         model=mens_model,
         feature_cols=mens_metadata['feature_cols'],
         scaler=mens_metadata['scaler'],
@@ -77,7 +86,7 @@ def main():
     
     print("Generating Women's predictions...")
     womens_predictions = train_and_predict_model(
-        womens_prediction_data, "women's", [], None, PREDICTION_SEASONS,
+        womens_modeling_data, "women's", [], None, PREDICTION_SEASONS,
         model=womens_model,
         feature_cols=womens_metadata['feature_cols'],
         scaler=womens_metadata['scaler'],
