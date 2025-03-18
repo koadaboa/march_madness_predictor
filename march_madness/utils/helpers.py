@@ -198,7 +198,45 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
                     X_val_reduced = X_val_enhanced.drop(dropped_features, axis=1, errors='ignore')
 
                     # Make predictions
-                    val_preds_proba = model.predict_proba(X_val_reduced)[:, 1]
+                    if isinstance(model, dict) and 'main_model' in model and 'round_models' in model:
+                        # Using combined model with round-specific models
+                        main_model = model['main_model']
+                        round_models = model['round_models']
+                        
+                        # Initialize predictions array
+                        val_preds_proba = np.zeros(len(X_val_reduced))
+                        
+                        # Check if we have round information
+                        if 'ExpectedRound' in validation_df.columns:
+                            print(f"Using round-specific models for validation where available")
+                            
+                            # Make predictions for each sample
+                            for i, row in validation_df.iterrows():
+                                # Get expected round for this matchup
+                                round_name = row['ExpectedRound']
+                                features = X_val_reduced.loc[i]
+                                
+                                if round_name in round_models:
+                                    # Use round-specific model with weight
+                                    round_pred = round_models[round_name].predict_proba(features.values.reshape(1, -1))[0][1]
+                                    main_pred = main_model.predict_proba(features.values.reshape(1, -1))[0][1]
+                                    
+                                    # Blend with more weight to round-specific model in later rounds
+                                    if round_name in ['Championship', 'Final4', 'Elite8', 'Sweet16']:
+                                        blend_weight = 0.7  # 70% round-specific, 30% main model
+                                    else:
+                                        blend_weight = 0.5  # 50-50 blend for earlier rounds
+                                        
+                                    val_preds_proba[i] = (blend_weight * round_pred) + ((1-blend_weight) * main_pred)
+                                else:
+                                    # Use main model
+                                    val_preds_proba[i] = main_model.predict_proba(features.values.reshape(1, -1))[0][1]
+                        else:
+                            # Use main model for all predictions
+                            val_preds_proba = main_model.predict_proba(X_val_reduced)[:, 1]
+                    else:
+                        # Use standard model (backward compatibility)
+                        val_preds_proba = model.predict_proba(X_val_reduced)[:, 1]
 
                     if gender == "women's":
                         # Apply calibration
@@ -310,16 +348,16 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
                         feature_cols = available_features
 
                 try:
-                    # Prepare prediction features
+                    # Prepare prediction features 
                     prediction_features = season_predictions[feature_cols].copy()
-
+                    
                     # Apply feature engineering
                     if scaler is not None:
                         prediction_features_scaled = scaler.transform(prediction_features)
                         prediction_features = pd.DataFrame(prediction_features_scaled, columns=feature_cols)
-
+                    
                     prediction_features_enhanced = create_feature_interactions(prediction_features)
-
+                    
                     # Remove dropped features if provided
                     if dropped_features:
                         prediction_features_reduced = prediction_features_enhanced.drop(
@@ -329,26 +367,39 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
                         )
                     else:
                         prediction_features_reduced = prediction_features_enhanced
-
-                    # NEW: Handle model structure (dict with main and round models)
+                    
+                    # Check if we have a model dictionary with round-specific models
                     if isinstance(model, dict) and 'main_model' in model and 'round_models' in model:
                         main_model = model['main_model']
                         round_models = model['round_models']
                         
-                        # Make predictions with appropriate model for each round
+                        # Initialize predictions array
                         pred_proba = np.zeros(len(prediction_features_reduced))
                         
+                        # Check if we have round information
                         if 'ExpectedRound' in season_predictions.columns:
-                            for i, row in enumerate(prediction_features_reduced.iterrows()):
-                                idx, features = row
+                            print(f"Using round-specific models where available")
+                            
+                            # Make predictions for each sample
+                            for i, (idx, features) in enumerate(prediction_features_reduced.iterrows()):
+                                # Get expected round for this matchup
                                 round_name = season_predictions.iloc[i]['ExpectedRound']
                                 
                                 if round_name in round_models:
-                                    # Use round-specific model
-                                    pred_proba[i] = round_models[round_name].predict_proba([features])[0][1]
+                                    # Use round-specific model with weight
+                                    round_pred = round_models[round_name].predict_proba(features.values.reshape(1, -1))[0][1]
+                                    main_pred = main_model.predict_proba(features.values.reshape(1, -1))[0][1]
+                                    
+                                    # Blend with more weight to round-specific model in later rounds
+                                    if round_name in ['Championship', 'Final4', 'Elite8', 'Sweet16']:
+                                        blend_weight = 0.7  # 70% round-specific, 30% main model
+                                    else:
+                                        blend_weight = 0.5  # 50-50 blend for earlier rounds
+                                        
+                                    pred_proba[i] = (blend_weight * round_pred) + ((1-blend_weight) * main_pred)
                                 else:
                                     # Use main model
-                                    pred_proba[i] = main_model.predict_proba([features])[0][1]
+                                    pred_proba[i] = main_model.predict_proba(features.values.reshape(1, -1))[0][1]
                         else:
                             # Use main model for all predictions
                             pred_proba = main_model.predict_proba(prediction_features_reduced)[:, 1]
