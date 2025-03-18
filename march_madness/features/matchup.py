@@ -1201,40 +1201,65 @@ def create_seed_based_trend_features(all_teams, seed_data, season):
     return pd.DataFrame(results)
 
 def create_upset_specific_features(X, gender="men's"):
-    """
-    Create features specifically designed to detect upset potential
-    
-    Args:
-        X: Feature DataFrame
-        gender: 'men's' or 'women's' 
-        
-    Returns:
-        Enhanced feature DataFrame
-    """
-    import numpy as np
-    
+    """Enhanced version of create_upset_specific_features with more predictive features."""
     X_enhanced = X.copy()
     
-    # Add features that correlate with historical upsets
+    # Core seed difference transformations
+    if 'SeedDiff' in X.columns:
+        X_enhanced['SeedDiffLog'] = np.log(abs(X['SeedDiff']) + 1) * np.sign(X['SeedDiff'])
+        X_enhanced['SeedDiffSquared'] = X['SeedDiff'] ** 2 * np.sign(X['SeedDiff'])
+        
+        # Add seed threshold features (capture historical upset patterns)
+        X_enhanced['UpsetZone_8v9'] = ((X['Team1Seed'] == 8) & (X['Team2Seed'] == 9)) | ((X['Team1Seed'] == 9) & (X['Team2Seed'] == 8))
+        X_enhanced['UpsetZone_5v12'] = ((X['Team1Seed'] == 5) & (X['Team2Seed'] == 12)) | ((X['Team1Seed'] == 12) & (X['Team2Seed'] == 5))
+        X_enhanced['UpsetZone_6v11'] = ((X['Team1Seed'] == 6) & (X['Team2Seed'] == 11)) | ((X['Team1Seed'] == 11) & (X['Team2Seed'] == 6))
+        X_enhanced['UpsetZone_7v10'] = ((X['Team1Seed'] == 7) & (X['Team2Seed'] == 10)) | ((X['Team1Seed'] == 10) & (X['Team2Seed'] == 7))
+    
+    # Add momentum * seed interactions
+    if all(col in X.columns for col in ['Team1WinRate_Last10', 'SeedDiff']):
+        X_enhanced['UnderdogMomentum'] = np.where(
+            X['SeedDiff'] > 0,  # Team1 is underdog
+            X['Team1WinRate_Last10'] * np.sqrt(abs(X['SeedDiff'])),
+            X['Team2WinRate_Last10'] * np.sqrt(abs(X['SeedDiff']))
+        )
+    
+    # Add specific performance metrics that correlate with upsets
     if gender == "men's":
-        # Men's tournament upset indicators
-        if 'Team1FG3Pct' in X.columns and 'Team2FG3Pct' in X.columns and 'SeedDiff' in X.columns:
-            X_enhanced['ThreePointUpsetFactor'] = (X['Team1FG3Pct'] - X['Team2FG3Pct']) * X['SeedDiff']
+        # Men's upset factors
+        if all(col in X.columns for col in ['Team1FG3Pct', 'Team2FG3Pct', 'SeedDiff']):
+            # 3-point shooting is critical for men's upsets
+            X_enhanced['ThreePointAdvantage'] = X['Team1FG3Pct'] - X['Team2FG3Pct'] 
+            X_enhanced['ThreePointUpsetFactor'] = X_enhanced['ThreePointAdvantage'] * np.sign(X['SeedDiff']) * np.log(abs(X['SeedDiff']) + 1)
         
-        if all(col in X.columns for col in ['Team1Stl', 'Team1Blk', 'Team2Stl', 'Team2Blk']):
-            X_enhanced['DefensiveDisruptionFactor'] = (X['Team1Stl'] * X['Team1Blk']) / (X['Team2Stl'] * X['Team2Blk'] + 0.001)
-        
-        if 'Team1WinRate_Last10' in X.columns and 'SeedDiff' in X.columns:
-            X_enhanced['MomentumVsSeedGap'] = X['Team1WinRate_Last10'] / (abs(X['SeedDiff']) + 1)
-        
-        # Add non-linear seed difference transformations
-        if 'SeedDiff' in X.columns:
-            X_enhanced['SeedDiffLog'] = np.log(abs(X['SeedDiff']) + 1) * np.sign(X['SeedDiff'])
-            X_enhanced['SeedDiffSquared'] = X['SeedDiff'] ** 2 * np.sign(X['SeedDiff'])
-        
-        # Final Four specific features
-        if all(col in X.columns for col in ['Team1TourneyAppearances', 'Team2TourneyAppearances', 'Team1TournamentReadiness']):
-            tournament_experience_factor = (X['Team1TourneyAppearances'] - X['Team2TourneyAppearances']) / 10
-            X_enhanced['FinalFourReadiness'] = X['Team1TournamentReadiness'] - tournament_experience_factor
+        # Defense metrics are key in men's upsets
+        if all(col in X.columns for col in ['Team1DefEfficiency', 'Team2DefEfficiency']):
+            X_enhanced['UnderdogDefenseFactor'] = np.where(
+                X['SeedDiff'] > 0,  # Team1 is underdog
+                X['Team2DefEfficiency'] - X['Team1DefEfficiency'],
+                X['Team1DefEfficiency'] - X['Team2DefEfficiency']
+            )
+    else:
+        # Women's upset factors
+        if all(col in X.columns for col in ['Team1TourneyWinRate', 'Team2TourneyWinRate', 'SeedDiff']):
+            # Experience matters more in women's upsets
+            X_enhanced['UnderdogExperienceFactor'] = np.where(
+                X['SeedDiff'] > 0,  # Team1 is underdog
+                X['Team1TourneyWinRate'],
+                X['Team2TourneyWinRate']
+            )
+    
+    # Add composite upset likelihood score based on historical patterns
+    upset_indicators = []
+    if 'UnderdogMomentum' in X_enhanced.columns:
+        upset_indicators.append(X_enhanced['UnderdogMomentum'] * 0.3)
+    if 'ThreePointUpsetFactor' in X_enhanced.columns:
+        upset_indicators.append(np.where(X_enhanced['ThreePointUpsetFactor'] > 0, 
+                                        X_enhanced['ThreePointUpsetFactor'] * 0.25, 0))
+    if 'UnderdogDefenseFactor' in X_enhanced.columns:
+        upset_indicators.append(np.where(X_enhanced['UnderdogDefenseFactor'] > 0, 
+                                        X_enhanced['UnderdogDefenseFactor'] * 0.2, 0))
+    
+    if upset_indicators:
+        X_enhanced['CompositeUpsetScore'] = sum(upset_indicators)
     
     return X_enhanced

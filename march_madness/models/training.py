@@ -628,51 +628,85 @@ def create_womens_specific_model(random_state=3):
         )
 
 def train_round_specific_models(X_train, y_train, tournament_rounds, gender):
-    """Train separate models for specific tournament rounds"""
-    
+    """Train specialized models for each tournament round with optimized hyperparameters"""
     round_models = {}
+    
+    # Define key rounds that need specialized handling
+    critical_rounds = {
+        "men's": ['Sweet16', 'Elite8', 'Final4', 'Championship'],
+        "women's": ['Final4', 'Championship']
+    }
+    
+    # Get appropriate critical rounds list
+    key_rounds = critical_rounds.get(gender, [])
     
     for round_name in tournament_rounds:
         print(f"Training specialized model for {round_name}...")
         
         # Filter training data for this round
         round_mask = X_train['ExpectedRound'] == round_name
-        if sum(round_mask) < 10:  # Need minimum examples
+        if sum(round_mask) < 15:  # Need minimum examples
             print(f"Insufficient data for {round_name}, using general model")
             continue
             
         X_round = X_train[round_mask]
         y_round = y_train[round_mask]
         
-        if round_name == 'Final4' and gender == "women's":
-            # Custom model for women's Final Four
-            model = RandomForestClassifier(
-                n_estimators=300,
-                max_depth=5,
-                min_samples_split=3,
-                class_weight='balanced',
-                random_state=42
-            )
-        elif round_name == 'Elite8' and gender == "men's":
-            # Custom model for men's Elite 8
+        # Add upset balance for critical rounds
+        if round_name in key_rounds:
+            # For critical rounds, use balanced class weights or SMOTE
+            from imblearn.over_sampling import SMOTE
+            if sum(y_round) > 3 and len(y_round) - sum(y_round) > 3:  # Need enough samples of each class
+                sm = SMOTE(random_state=42)
+                X_round, y_round = sm.fit_resample(X_round, y_round)
+                print(f"  Applied SMOTE for {round_name} - now {len(X_round)} samples")
+        
+        # Create optimized models for each round
+        if round_name == 'Sweet16' and gender == "men's":
+            # Sweet16 has been problematic for men (37.5% accuracy)
             model = XGBClassifier(
                 n_estimators=500,
+                learning_rate=0.03,
+                max_depth=4,
+                subsample=0.85,
+                colsample_bytree=0.8,
+                scale_pos_weight=2.0,  # Favor upsets more
+                random_state=42
+            )
+        elif round_name == 'Final4' and gender == "women's":
+            # Final4 has been problematic for women (33.3% accuracy)
+            model = LogisticRegression(
+                C=0.7,
+                class_weight='balanced',
+                solver='liblinear',
+                random_state=42
+            )
+        elif round_name in key_rounds:
+            # Other critical rounds get specialized models
+            model = GradientBoostingClassifier(
+                n_estimators=250,
                 learning_rate=0.05,
-                max_depth=3,
-                subsample=0.9,
+                max_depth=4,
+                subsample=0.85,
                 random_state=42
             )
         else:
             # Default round-specific model
-            model = LogisticRegression(
-                C=0.8,
+            model = RandomForestClassifier(
+                n_estimators=300,
+                max_depth=6,
+                min_samples_split=5,
                 class_weight='balanced',
-                solver='liblinear',
                 random_state=42
             )
             
         # Train and store model
         model.fit(X_round, y_round)
         round_models[round_name] = model
+        
+        # Evaluate on training data
+        train_preds = model.predict(X_round)
+        train_accuracy = accuracy_score(y_round, train_preds)
+        print(f"  {round_name} model training accuracy: {train_accuracy:.4f}")
         
     return round_models

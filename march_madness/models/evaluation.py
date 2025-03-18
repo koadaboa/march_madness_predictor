@@ -29,7 +29,43 @@ def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff', g
         # Women's tournament calibration values - MORE EXTREME FOR FAVORITES
         round_factors = {
             'Championship': {  # Women are very predictable in championship (80% accuracy)
-                'heavy_favorite': 1.25,  # Much more confident in heavy favorites
+                'heavy_favorite': 1.15,  # Much more confident in heavy favorites
+                'favorite': 1.10,
+                'slight_favorite': 1.05,
+                'even': 1.0,
+                'slight_underdog': 0.9,
+                'underdog': 0.85,
+                'heavy_underdog': 0.8
+            },
+            'Final4': {  # Women's Final Four very unpredictable (33% accuracy)
+                'heavy_favorite': 0.9,  # Be conservative with favorites
+                'favorite': 0.85,
+                'slight_favorite': 0.85,
+                'even': 1.0,
+                'slight_underdog': 1.15,  # Boost underdogs
+                'underdog': 1.2,
+                'heavy_underdog': 1.25
+            },
+            'Elite8': {  # Women's Elite 8 is very predictable (87.5% accuracy)
+                'heavy_favorite': 1.30,  # Much higher confidence
+                'favorite': 1.25,
+                'slight_favorite': 1.20,
+                'even': 1.0,
+                'slight_underdog': 0.80,
+                'underdog': 0.75,
+                'heavy_underdog': 0.70
+            },
+            'Sweet16': {  # Women's Sweet 16 is strong (73% accuracy)
+                'heavy_favorite': 1.20,
+                'favorite': 1.15,
+                'slight_favorite': 1.10,
+                'even': 1.0,
+                'slight_underdog': 0.90,
+                'underdog': 0.85,
+                'heavy_underdog': 0.80
+            },
+            'Round32': {  # Women's Round of 32 is stronger than you thought (75% accuracy)
+                'heavy_favorite': 1.25,  # Increase confidence
                 'favorite': 1.20,
                 'slight_favorite': 1.15,
                 'even': 1.0,
@@ -37,27 +73,9 @@ def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff', g
                 'underdog': 0.80,
                 'heavy_underdog': 0.75
             },
-            'Final4': {  # Women's Final Four very unpredictable (33% accuracy)
-                'heavy_favorite': 0.95,  # Be conservative with favorites
-                'favorite': 0.92,
-                'slight_favorite': 0.90,
-                'even': 1.0,
-                'slight_underdog': 1.10,  # Boost underdogs
-                'underdog': 1.15,
-                'heavy_underdog': 1.20
-            },
-            'Round32': {  # Women's Round of 32 is good (60% accuracy)
-                'heavy_favorite': 1.15,
-                'favorite': 1.12,
-                'slight_favorite': 1.08,
-                'even': 1.0,
-                'slight_underdog': 0.90,
-                'underdog': 0.85,
-                'heavy_underdog': 0.80
-            },
             'default': {  # Default factors for other rounds
-                'heavy_favorite': 1.12,
-                'favorite': 1.08,
+                'heavy_favorite': 1.15,  # Slightly higher overall confidence
+                'favorite': 1.10,
                 'slight_favorite': 1.05,
                 'even': 1.0,
                 'slight_underdog': 0.92,
@@ -207,7 +225,43 @@ def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff', g
             # Don't go above 0.45 for heavy underdogs
             calibrated_preds[i] = min(0.45, max(0.02, adjusted_pred))
     
-    # Ensure all predictions are valid probabilities
+    # Add confidence boosting to push predictions away from 0.5
+    for i in range(len(calibrated_preds)):
+        current_pred = calibrated_preds[i]
+        
+        # Only adjust predictions that aren't too extreme already
+        if 0.4 < current_pred < 0.6:
+            # Calculate distance from 0.5
+            distance_from_center = abs(current_pred - 0.5)
+            
+            # Calculate boost factor - increases the further from 0.5
+            boost_factor = distance_from_center * 2.0
+            
+            # Apply the boost (preserving direction)
+            if current_pred > 0.5:
+                calibrated_preds[i] = current_pred + (boost_factor * 0.05)
+            else:
+                calibrated_preds[i] = current_pred - (boost_factor * 0.05)
+
+    # Add confidence boosting for predictions near the middle
+    for i in range(len(calibrated_preds)):
+        raw_pred = calibrated_preds[i]
+        
+        # For women's tournament - wider range since model is more accurate
+        if 0.35 < raw_pred < 0.65:
+            # Calculate distance from 0.5
+            distance = abs(raw_pred - 0.5)
+            
+            # Stronger boost for women's tournament (higher overall accuracy)
+            boost_magnitude = distance * 0.7
+            
+            # Apply the boost in the appropriate direction
+            if raw_pred > 0.5:
+                calibrated_preds[i] = raw_pred + boost_magnitude
+            else:
+                calibrated_preds[i] = raw_pred - boost_magnitude
+
+    # Ensure all predictions remain in valid range
     calibrated_preds = np.clip(calibrated_preds, 0.001, 0.999)
     
     return calibrated_preds
@@ -253,71 +307,60 @@ def calibrate_mens_predictions(predictions, X_test, seed_diff_col='SeedDiff'):
     
     # Update round factors based on empirical performance
     # Significantly adjust Final Four and Sweet 16 where model underperforms
-    round_factors = {
-        'Championship': {
-            'heavy_favorite': 1.25,  # Increase confidence in strong seeds
-            'favorite': 1.15,
-            'slight_favorite': 1.08,
-            'even': 1.0,
-            'slight_underdog': 0.92,
-            'underdog': 0.85,
-            'heavy_underdog': 0.80
-        },
-        'Final4': {
-            # Dramatically reduce confidence in favorites - model overpredicts them
-            'heavy_favorite': 0.80,
+        round_factors = {
+        'Championship': {  # Men's championship is weaker (40% accuracy)
+            'heavy_favorite': 0.90,  # Reduce confidence
             'favorite': 0.85,
-            'slight_favorite': 0.90,
+            'slight_favorite': 0.85,
             'even': 1.0,
-            'slight_underdog': 1.12,  # Boost underdogs (consistently better than predicted)
+            'slight_underdog': 1.10,  # Boost underdogs
+            'underdog': 1.15,
+            'heavy_underdog': 1.20
+        },
+        'Elite8': {  # Men's Elite 8 is weaker (41.7% accuracy)
+            'heavy_favorite': 0.90,
+            'favorite': 0.85,
+            'slight_favorite': 0.85,
+            'even': 1.0,
+            'slight_underdog': 1.10,
+            'underdog': 1.15,
+            'heavy_underdog': 1.20
+        },
+        'Sweet16': {  # Men's Sweet 16 is very weak (37.5% accuracy)
+            'heavy_favorite': 0.85,  # Much less confidence
+            'favorite': 0.80,
+            'slight_favorite': 0.80,
+            'even': 1.0,
+            'slight_underdog': 1.15,  # Boost underdogs significantly
             'underdog': 1.20,
             'heavy_underdog': 1.25
         },
-        'Elite8': {
-            'heavy_favorite': 0.95,  # Adjust based on better Elite8 performance (58.3% accuracy)
-            'favorite': 0.97,
-            'slight_favorite': 0.98,
+        'Round64': {  # Men's Round 64 is strong (64% accuracy)
+            'heavy_favorite': 1.20,
+            'favorite': 1.15,
+            'slight_favorite': 1.10,
             'even': 1.0,
-            'slight_underdog': 1.02,
-            'underdog': 1.05,
-            'heavy_underdog': 1.10
+            'slight_underdog': 0.90,
+            'underdog': 0.85,
+            'heavy_underdog': 0.80
         },
-        'Sweet16': {
-            # Severely reduce confidence in favorites - lowest accuracy round
-            'heavy_favorite': 0.75,
-            'favorite': 0.82,
-            'slight_favorite': 0.90,
-            'even': 1.0,
-            'slight_underdog': 1.15,
-            'underdog': 1.25,
-            'heavy_underdog': 1.30  # Significant boost to underdogs
-        },
-        'Round32': {
-            'heavy_favorite': 1.15,  # Model performs well in early rounds with favorites
-            'favorite': 1.10,
+        'Round32': {  # Men's Round 32 is decent (56% accuracy)
+            'heavy_favorite': 1.10,
+            'favorite': 1.05,
             'slight_favorite': 1.05,
             'even': 1.0,
             'slight_underdog': 0.95,
             'underdog': 0.90,
             'heavy_underdog': 0.85
         },
-        'Round64': {
-            'heavy_favorite': 1.20,  # Model performs very well in first round
-            'favorite': 1.15,
-            'slight_favorite': 1.08,
+        'default': {  # Default factors
+            'heavy_favorite': 1.05,
+            'favorite': 1.02,
+            'slight_favorite': 1.01,
             'even': 1.0,
-            'slight_underdog': 0.92,
-            'underdog': 0.85,
-            'heavy_underdog': 0.80
-        },
-        'default': {
-            'heavy_favorite': 1.0,
-            'favorite': 1.0,
-            'slight_favorite': 1.0,
-            'even': 1.0,
-            'slight_underdog': 1.0,
-            'underdog': 1.0,
-            'heavy_underdog': 1.0
+            'slight_underdog': 0.99,
+            'underdog': 0.98,
+            'heavy_underdog': 0.95
         }
     }
     
@@ -503,7 +546,60 @@ def calibrate_mens_predictions(predictions, X_test, seed_diff_col='SeedDiff'):
             else:
                 calibrated_preds[i] = min(0.35, max(0.10, adjusted_pred))
     
-    # Ensure all predictions are valid probabilities
+    # Add confidence boosting for problematic rounds
+    for i in range(len(calibrated_preds)):
+        current_pred = calibrated_preds[i]
+        current_round = None
+        
+        # Get the round if available
+        if tournament_round is not None:
+            current_round = tournament_round[i]
+        
+        # Apply stronger confidence boost for Round64 (where model performs well)
+        if current_round == 'Round64' and 0.4 < current_pred < 0.6:
+            # For Round64, boost confidence more (men's model is 64% accurate here)
+            distance_from_center = abs(current_pred - 0.5)
+            boost_factor = distance_from_center * 3.0
+            
+            # Apply the boost (preserving direction)
+            if current_pred > 0.5:
+                calibrated_preds[i] = current_pred + (boost_factor * 0.07)
+            else:
+                calibrated_preds[i] = current_pred - (boost_factor * 0.07)
+        
+        # Apply more modest boost to other rounds
+        elif 0.4 < current_pred < 0.6:
+            # Calculate distance from 0.5
+            distance_from_center = abs(current_pred - 0.5)
+            
+            # Calculate boost factor
+            boost_factor = distance_from_center * 2.0
+            
+            # Apply the boost (preserving direction)
+            if current_pred > 0.5:
+                calibrated_preds[i] = current_pred + (boost_factor * 0.05)
+            else:
+                calibrated_preds[i] = current_pred - (boost_factor * 0.05)
+
+    # Add confidence boosting for predictions near the middle
+    for i in range(len(calibrated_preds)):
+        raw_pred = calibrated_preds[i]
+        
+        # For men's tournament - slightly more conservative range
+        if 0.4 < raw_pred < 0.6:
+            # Calculate distance from 0.5
+            distance = abs(raw_pred - 0.5)
+            
+            # More conservative boost for men's tournament (lower overall accuracy)
+            boost_magnitude = distance * 0.5
+            
+            # Apply the boost in the appropriate direction
+            if raw_pred > 0.5:
+                calibrated_preds[i] = raw_pred + boost_magnitude
+            else:
+                calibrated_preds[i] = raw_pred - boost_magnitude
+
+    # Ensure all predictions remain in valid range
     calibrated_preds = np.clip(calibrated_preds, 0.001, 0.999)
     
     return calibrated_preds
