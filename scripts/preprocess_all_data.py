@@ -143,8 +143,7 @@ def main():
                 mens_modeling_data.get('pressure_metrics', None),
                 mens_modeling_data.get('conf_impact', None),
                 mens_modeling_data.get('seed_features', None),
-                mens_modeling_data.get('coach_metrics', None),
-                tournament_only=True  # Only generate matchups between tournament teams
+                mens_modeling_data.get('coach_metrics', None)
             )
             
             # Store tournament-only matchups in a new dictionary
