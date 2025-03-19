@@ -180,6 +180,7 @@ def run_tournament_simulation_pre_tournament(seed_data, predictions_df, tourname
 def combine_predictions(mens_predictions, womens_predictions):
     """
     Combines predictions for men's and women's tournaments into a single submission file
+    Only processes each unique matchup once (team1_id < team2_id)
 
     Args:
         mens_predictions: DataFrame with men's tournament predictions
@@ -196,13 +197,19 @@ def combine_predictions(mens_predictions, womens_predictions):
         team2_id = row['Team2ID']
         pred = row['Pred']
 
-        # Sort team IDs to ensure lower ID comes first (per Kaggle requirements)
+        # Since we've already ensured team1_id < team2_id during matchup generation,
+        # this check is now redundant but kept for safety
         if team1_id < team2_id:
             matchup_id = f"{season}_{team1_id}_{team2_id}"
             mens_rows.append({"ID": matchup_id, "Pred": pred})
         else:
+            # This branch should never be taken with the updated matchup generation
             matchup_id = f"{season}_{team2_id}_{team1_id}"
             mens_rows.append({"ID": matchup_id, "Pred": 1 - pred})  # Invert probability when teams are swapped
+            print(f"WARNING: Found unexpected matchup order: team1_id={team1_id}, team2_id={team2_id}")
+
+    # Create separate DataFrame
+    mens_submission = pd.DataFrame(mens_rows)
 
     # Create submission rows for women's predictions
     womens_rows = []
@@ -212,16 +219,17 @@ def combine_predictions(mens_predictions, womens_predictions):
         team2_id = row['Team2ID']
         pred = row['Pred']
 
-        # Sort team IDs to ensure lower ID comes first (per Kaggle requirements)
+        # Same check for women's predictions
         if team1_id < team2_id:
             matchup_id = f"{season}_{team1_id}_{team2_id}"
             womens_rows.append({"ID": matchup_id, "Pred": pred})
         else:
+            # This branch should never be taken with the updated matchup generation
             matchup_id = f"{season}_{team2_id}_{team1_id}"
-            womens_rows.append({"ID": matchup_id, "Pred": 1 - pred})  # Invert probability when teams are swapped
+            womens_rows.append({"ID": matchup_id, "Pred": 1 - pred})
+            print(f"WARNING: Found unexpected matchup order: team1_id={team1_id}, team2_id={team2_id}")
 
-    # Create separate DataFrames
-    mens_submission = pd.DataFrame(mens_rows)
+    # Create separate DataFrame
     womens_submission = pd.DataFrame(womens_rows)
 
     # Combine predictions
@@ -239,4 +247,3 @@ def combine_predictions(mens_predictions, womens_predictions):
     print(f"- Women's predictions: {len(womens_submission)}")
 
     return combined_submission
-

@@ -992,7 +992,7 @@ def create_tournament_prediction_dataset(seasons, team_profiles, seed_data, mome
         matchups = []
         for team1_id in all_teams:
             for team2_id in all_teams:
-                if team1_id != team2_id:
+                if team1_id < team2_id:
                     matchups.append((team1_id, team2_id))
 
         print(f"Generated {len(matchups)} possible matchups between all teams")
