@@ -315,7 +315,7 @@ def prepare_modeling_data(data_dict, gender, starting_season, current_season, se
     # Cache the results if a cache directory is provided
     if cache_dir is not None:
         os.makedirs(cache_dir, exist_ok=True)
-        cache_file = os.path.join(cache_dir, f"{gender}_modeling_data.pkl")
+        cache_file = os.path.join(cache_dir, f"{gender}_modeling_data_2025.pkl")
         print(f"Caching modeling data to {cache_file}")
         with open(cache_file, 'wb') as f:
             pickle.dump(return_data, f)

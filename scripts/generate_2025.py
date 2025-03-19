@@ -28,8 +28,11 @@ def main():
     print("Loading 2025 seed data...")
     try:
         # Try to load the 2025 seed files
-        mens_2025_seeds = pd.read_csv(os.path.join(data_dir, 'MNCAATourneySeeds2025.csv'))
-        womens_2025_seeds = pd.read_csv(os.path.join(data_dir, 'WNCAATourneySeeds2025.csv'))
+        mens_seeds = pd.read_csv(os.path.join(data_dir, 'MNCAATourneySeeds.csv'))
+        womens_seeds = pd.read_csv(os.path.join(data_dir, 'WNCAATourneySeeds.csv'))
+
+        mens_2025_seeds = mens_seeds[mens_seeds['Season'] == PREDICTION_SEASON]
+        womens_2025_seeds = womens_seeds[womens_seeds['Season'] == PREDICTION_SEASON]
         
         # Ensure we have the expected columns
         if 'Season' not in mens_2025_seeds.columns:
