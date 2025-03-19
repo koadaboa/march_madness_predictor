@@ -1,7 +1,7 @@
 # Configuration settings
 RANDOM_STATE = 3
-STARTING_SEASON = 2014
+STARTING_SEASON = 2015
 CURRENT_SEASON = 2024
-TRAINING_SEASONS = list(range(2014, 2019))  # 2015-2018 for training
-VALIDATION_SEASON = 2019                   # 2019 for validation
-PREDICTION_SEASONS = [2021, 2022, 2023,2024]  # 2021-2024 for prediction
+TRAINING_SEASONS = [year for year in range(2015, 2023) if year != 2020]
+VALIDATION_SEASON = 2022               
+PREDICTION_SEASONS = [2023,2024]
