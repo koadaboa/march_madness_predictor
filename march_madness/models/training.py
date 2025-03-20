@@ -305,6 +305,9 @@ def gender_specific_feature_selection(X, y, gender, importance_threshold=0.01):
             'Team1PressureScore', 'Team2PressureScore', # Performance under pressure
             'TourneyAppearancesDiff',  # Tournament experience
             'Team1RoundWinRate', 'Team2RoundWinRate', # Round-specific performance
+            'CompositeUpsetScore',  # New feature for detecting upset potential
+            'UpsetZone_MajorUpsetsV1',  # Zones of high upset probability
+            'ThreePointUpsetFactor'  # 3-point shooting upset indicator
         ]
     
     # Ensure must-include features are in the selection
@@ -512,55 +515,78 @@ def time_based_cross_validation(data_dict, gender, feature_engineering_func, mod
         return None
 
 def create_mens_specific_model(random_state=3):
-    # Add an SVM classifier specifically for upset detection
+    """
+    Create a men's tournament-specific model with enhanced upset detection
+    """
+    # Highly tuned SVM for upset detection
     upset_svm = SVC(
-        C=1.0,
+        C=1.5,  # More flexibility
         kernel='rbf',
         probability=True,
-        class_weight={0: 1, 1: 3},  # Heavily favor underdogs
+        class_weight={0: 1, 1: 4},  # Much higher weight for minority class (upsets)
+        gamma='scale',  # Helps with non-linear decision boundaries
         random_state=random_state
     )
     
-    # Add a gradient boosting classifier with class weights
-    gb_model = GradientBoostingClassifier(
-        n_estimators=300,
-        learning_rate=0.05,
-        max_depth=4,
-        subsample=0.8,
-        random_state=random_state
-    )
-    
-    # Modify XGBoost to focus more on upsets
+    # XGBoost with aggressive upset learning
     xgb_model = XGBClassifier(
-        n_estimators=800,
-        learning_rate=0.03,
-        max_depth=4,
+        n_estimators=1000,  # More trees
+        learning_rate=0.02,  # Slower learning
+        max_depth=5,  # Slightly deeper trees
         subsample=0.8,
         colsample_bytree=0.7,
-        gamma=0.2,
-        reg_alpha=0.2,
-        reg_lambda=1.5,
-        min_child_weight=3,
-        scale_pos_weight=2.5,  # Increase focus on minority class (upsets)
+        gamma=0.3,  # More conservative tree growth
+        reg_alpha=0.3,  # L1 regularization
+        reg_lambda=1.7,  # L2 regularization
+        min_child_weight=4,  # More conservative splits
+        scale_pos_weight=3.5,  # Strong focus on minority class (upsets)
         random_state=random_state
     )
     
-    # More balanced ensemble weights
+    # Gradient Boosting with upset sensitivity
+    gb_model = GradientBoostingClassifier(
+        n_estimators=400,
+        learning_rate=0.05,
+        max_depth=4,
+        min_samples_leaf=3,
+        min_samples_split=7,
+        subsample=0.85,
+        max_features='sqrt',
+        random_state=random_state
+    )
+    
+    # Random Forest with upset-aware configuration
+    rf_model = RandomForestClassifier(
+        n_estimators=600,
+        max_depth=8,
+        min_samples_split=5,
+        min_samples_leaf=2,
+        max_features='sqrt',
+        class_weight='balanced_subsample',
+        random_state=random_state,
+        n_jobs=-1
+    )
+    
+    # Logistic Regression with careful regularization
+    logistic_model = LogisticRegression(
+        C=0.7,  # Less regularization
+        class_weight='balanced',
+        solver='liblinear',
+        penalty='l1',  # Sparse feature selection
+        random_state=random_state
+    )
+    
+    # Ensemble with carefully tuned weights
     return VotingClassifier(
         estimators=[
-            ('xgb', xgb_model),
-            ('gb', gb_model),
-            ('svm', upset_svm),
-            ('rf', RandomForestClassifier(
-                n_estimators=500,
-                max_depth=8,
-                min_samples_split=4,
-                class_weight='balanced_subsample',
-                random_state=random_state
-            ))
+            ('xgb', xgb_model),     # Strong predictive power
+            ('svm', upset_svm),     # Sensitive to upsets
+            ('rf', rf_model),       # Robust to variations
+            ('gb', gb_model),       # Captures complex interactions
+            ('lr', logistic_model)  # Linear baseline
         ],
         voting='soft',
-        weights=[0.35, 0.25, 0.2, 0.2]  # Give more weight to upset-focused models
+        weights=[0.35, 0.25, 0.20, 0.15, 0.05]  # Prioritize upset-sensitive models
     )
 
 def create_womens_specific_model(random_state=3):

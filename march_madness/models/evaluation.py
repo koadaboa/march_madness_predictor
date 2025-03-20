@@ -305,19 +305,27 @@ def calibrate_mens_predictions(predictions, X_test, seed_diff_col='SeedDiff'):
                 # Store these common metrics
                 def_metrics[metric] = X_test[metric].values
     
-    # Update round factors based on empirical performance
-    # Significantly adjust Final Four and Sweet 16 where model underperforms
-        round_factors = {
-        'Championship': {  # Men's championship is weaker (40% accuracy)
-            'heavy_favorite': 0.90,  # Reduce confidence
+    # Adjust round factors to be more upset-friendly
+    round_factors = {
+        'Round64': {  # More aggressive upset potential in first round
+            'heavy_favorite': 0.90,  # Reduce confidence in top seeds
             'favorite': 0.85,
             'slight_favorite': 0.85,
             'even': 1.0,
-            'slight_underdog': 1.10,  # Boost underdogs
-            'underdog': 1.15,
-            'heavy_underdog': 1.20
+            'slight_underdog': 1.15,  # Boost underdogs
+            'underdog': 1.20,
+            'heavy_underdog': 1.25
         },
-        'Elite8': {  # Men's Elite 8 is weaker (41.7% accuracy)
+        'Sweet16': {  # Known for upsets in men's tournament
+            'heavy_favorite': 0.85,  # Much less confidence for top seeds
+            'favorite': 0.80,
+            'slight_favorite': 0.80,
+            'even': 1.0,
+            'slight_underdog': 1.15,  # Significant boost for underdogs
+            'underdog': 1.20,
+            'heavy_underdog': 1.25
+        },
+        'Elite8': {  # Moderate upset potential
             'heavy_favorite': 0.90,
             'favorite': 0.85,
             'slight_favorite': 0.85,
@@ -326,51 +334,41 @@ def calibrate_mens_predictions(predictions, X_test, seed_diff_col='SeedDiff'):
             'underdog': 1.15,
             'heavy_underdog': 1.20
         },
-        'Sweet16': {  # Men's Sweet 16 is very weak (37.5% accuracy)
-            'heavy_favorite': 0.85,  # Much less confidence
+        'Final4': {  # Very unpredictable round
+            'heavy_favorite': 0.85,
             'favorite': 0.80,
             'slight_favorite': 0.80,
             'even': 1.0,
-            'slight_underdog': 1.15,  # Boost underdogs significantly
+            'slight_underdog': 1.15,
             'underdog': 1.20,
             'heavy_underdog': 1.25
         },
-        'Round64': {  # Men's Round 64 is strong (64% accuracy)
-            'heavy_favorite': 1.20,
-            'favorite': 1.15,
-            'slight_favorite': 1.10,
+        'Championship': {  # More conservative, but still upset-friendly
+            'heavy_favorite': 0.90,
+            'favorite': 0.85,
+            'slight_favorite': 0.85,
             'even': 1.0,
-            'slight_underdog': 0.90,
-            'underdog': 0.85,
-            'heavy_underdog': 0.80
+            'slight_underdog': 1.10,
+            'underdog': 1.15,
+            'heavy_underdog': 1.20
         },
-        'Round32': {  # Men's Round 32 is decent (56% accuracy)
-            'heavy_favorite': 1.10,
-            'favorite': 1.05,
-            'slight_favorite': 1.05,
+        'default': {
+            'heavy_favorite': 0.90,
+            'favorite': 0.85,
+            'slight_favorite': 0.85,
             'even': 1.0,
-            'slight_underdog': 0.95,
-            'underdog': 0.90,
-            'heavy_underdog': 0.85
-        },
-        'default': {  # Default factors
-            'heavy_favorite': 1.05,
-            'favorite': 1.02,
-            'slight_favorite': 1.01,
-            'even': 1.0,
-            'slight_underdog': 0.99,
-            'underdog': 0.98,
-            'heavy_underdog': 0.95
+            'slight_underdog': 1.10,
+            'underdog': 1.15,
+            'heavy_underdog': 1.20
         }
     }
     
-    # Create segments based on seed difference and round
-    segments = []
-    
-    for i in range(len(predictions)):
+    # Apply the calibration logic
+    for i in range(len(calibrated_preds)):
+        raw_pred = calibrated_preds[i]
         seed_diff = seed_diffs[i]
         
-        # Determine segment based on seed difference
+        # Determine seed segment
         if seed_diff <= -10:
             seed_segment = 'heavy_favorite'
         elif seed_diff <= -5:
@@ -386,220 +384,84 @@ def calibrate_mens_predictions(predictions, X_test, seed_diff_col='SeedDiff'):
         else:
             seed_segment = 'heavy_underdog'
         
-        # Add round information if available
-        round_segment = 'default'
+        # Determine round
+        current_round = 'default'
         if tournament_round is not None:
-            current_round = tournament_round[i]
-            if current_round in round_factors:
-                round_segment = current_round
+            round_name = tournament_round[i]
+            if round_name in round_factors:
+                current_round = round_name
         
-        segments.append((seed_segment, round_segment))
-    
-    # Apply calibration based on our analysis
-    for i in range(len(predictions)):
-        seed_segment, round_segment = segments[i]
-        raw_pred = predictions[i]
+        # Get calibration factor
+        base_factor = round_factors[current_round][seed_segment]
         
-        # Get base round factor
-        base_factor = round_factors[round_segment][seed_segment]
-        
-        # Initialize additional factors
+        # Additional adjustments based on other metrics
         defensive_factor = 1.0
-        shooting_factor = 1.0
-        
-        # Apply defensive factor adjustment (important in men's game)
         if 'Team1DefEfficiency' in def_metrics and 'Team2DefEfficiency' in def_metrics:
             team1_def = def_metrics['Team1DefEfficiency'][i]
             team2_def = def_metrics['Team2DefEfficiency'][i]
             
-            # Lower is better for defensive efficiency
+            # Lower defensive efficiency means better defense
             if team1_def < team2_def:
-                # Team 1 has better defense
                 def_advantage = min((team2_def - team1_def) / team2_def, 0.5)
-                
-                # Defense matters more in later rounds
-                if round_segment in ['Sweet16', 'Elite8', 'Final4', 'Championship']:
-                    def_weight = 0.35  # Higher weight in later rounds
-                else:
-                    def_weight = 0.15
-                
-                defensive_factor = 1.0 + (def_advantage * def_weight)
+                defensive_factor = 1.0 + (def_advantage * 0.3)
             else:
-                # Team 2 has better defense
                 def_advantage = min((team1_def - team2_def) / team1_def, 0.5)
-                
-                # Defense matters more in later rounds
-                if round_segment in ['Sweet16', 'Elite8', 'Final4', 'Championship']:
-                    def_weight = 0.35  # Higher weight in later rounds
-                else:
-                    def_weight = 0.15
-                
-                defensive_factor = 1.0 - (def_advantage * def_weight)
+                defensive_factor = 1.0 - (def_advantage * 0.3)
         
-        # Apply shooting factor adjustment (3-point shooting critical in men's game)
+        # 3-point shooting factor
+        shooting_factor = 1.0
         if 'Team1FG3Pct' in shooting_metrics and 'Team2FG3Pct' in shooting_metrics:
             team1_3pt = shooting_metrics['Team1FG3Pct'][i]
             team2_3pt = shooting_metrics['Team2FG3Pct'][i]
             
-            # Higher is better for shooting
+            # Higher is better for 3-point shooting
             if team1_3pt > team2_3pt:
-                # Team 1 has better 3-point shooting
                 shooting_advantage = min((team1_3pt - team2_3pt) / team2_3pt, 0.5)
-                
-                # 3-point shooting matters more in later rounds and upsets
-                if round_segment in ['Sweet16', 'Elite8', 'Final4']:
-                    if seed_segment in ['slight_underdog', 'underdog', 'heavy_underdog']:
-                        shooting_weight = a = 0.40  # Highest impact: later rounds with underdog
-                    else:
-                        shooting_weight = 0.20
-                else:
-                    shooting_weight = 0.10
-                
-                shooting_factor = 1.0 + (shooting_advantage * shooting_weight)
+                shooting_factor = 1.0 + (shooting_advantage * 0.3)
             else:
-                # Team 2 has better 3-point shooting
                 shooting_advantage = min((team2_3pt - team1_3pt) / team1_3pt, 0.5)
-                
-                # Same weighting as above
-                if round_segment in ['Sweet16', 'Elite8', 'Final4']:
-                    if seed_segment in ['slight_favorite', 'favorite', 'heavy_favorite']:
-                        shooting_weight = 0.40
-                    else:
-                        shooting_weight = 0.20
-                else:
-                    shooting_weight = 0.10
-                
-                shooting_factor = 1.0 - (shooting_advantage * shooting_weight)
+                shooting_factor = 1.0 - (shooting_advantage * 0.3)
         
-        # Extra adjustment for Final Four - add special handling for momentum
-        momentum_factor = 1.0
-        if round_segment == 'Final4' and 'WinRateDiff' in def_metrics:
-            win_rate_diff = def_metrics['WinRateDiff'][i]
-            
-            # Teams with late season momentum outperform in Final Four
-            if win_rate_diff > 0.1:  # Hot team 1
-                momentum_factor = 1.15
-            elif win_rate_diff < -0.1:  # Hot team 2
-                momentum_factor = 0.85
-        
-        # Special upset potential adjustment for rounds with poor upset detection
-        upset_factor = 1.0
-        if round_segment == 'Sweet16' and seed_segment in ['slight_underdog', 'underdog']:
-            # Additional boost specifically for Sweet 16 upsets
-            upset_factor = 1.15
-        elif round_segment == 'Final4' and seed_segment in ['underdog', 'heavy_underdog']:
-            # Even stronger boost for Final Four upsets (historically worst upset detection)
-            upset_factor = 1.20
-        elif round_segment == 'Round64' and seed_segment in ['underdog', 'heavy_underdog']:
-            # Moderate boost for first round upsets (yearly performance shows improvement needed)
-            upset_factor = 1.10
-        
-        # Combined calibration
-        combined_factor = base_factor * defensive_factor * shooting_factor * momentum_factor * upset_factor
+        # Combine all factors
+        combined_factor = base_factor * defensive_factor * shooting_factor
         
         # Apply the combined factor
-        adjusted_pred = raw_pred * combined_factor
+        calibrated_preds[i] = raw_pred * combined_factor
         
-        # Apply bounds based on segment to prevent extreme values - tuned based on historical data
+        # Ensure predictions stay within reasonable bounds
         if seed_segment == 'heavy_favorite':
-            # For 1-16 matchups in Round64, be very confident
-            if round_segment == 'Round64' and seed_diff <= -15:
-                calibrated_preds[i] = min(0.98, max(0.87, adjusted_pred))  # 1-seeds almost always win
-            else:
-                calibrated_preds[i] = min(0.97, max(0.75, adjusted_pred))
+            calibrated_preds[i] = min(0.95, max(0.6, calibrated_preds[i]))
         elif seed_segment == 'favorite':
-            if round_segment == 'Final4':
-                # Lower ceiling for favorites in Final Four (based on 41.7% accuracy)
-                calibrated_preds[i] = min(0.80, max(0.65, adjusted_pred))
-            else:
-                calibrated_preds[i] = min(0.95, max(0.70, adjusted_pred))
+            calibrated_preds[i] = min(0.90, max(0.5, calibrated_preds[i]))
         elif seed_segment == 'slight_favorite':
-            if round_segment == 'Final4' or round_segment == 'Sweet16':
-                # Lower ceiling for favorites in problematic rounds
-                calibrated_preds[i] = min(0.75, max(0.60, adjusted_pred))
-            else:
-                calibrated_preds[i] = min(0.90, max(0.60, adjusted_pred))
+            calibrated_preds[i] = min(0.85, max(0.45, calibrated_preds[i]))
         elif seed_segment == 'even':
-            # Keep closer to 0.5 for even matchups but allow more variation
-            calibrated_preds[i] = min(0.65, max(0.35, adjusted_pred))
-        elif seed_segment == 'slight_underdog':
-            # Higher minimum for underdogs in Final Four and Sweet 16
-            if round_segment in ['Final4', 'Sweet16']:
-                calibrated_preds[i] = min(0.55, max(0.25, adjusted_pred))
-            else:
-                calibrated_preds[i] = min(0.50, max(0.15, adjusted_pred))
-        elif seed_segment == 'underdog':
-            # Historical data shows poor accuracy on upsets (17.9% overall)
-            # Significantly raise the floor for underdog probabilities
-            if round_segment == 'Sweet16':
-                calibrated_preds[i] = min(0.48, max(0.20, adjusted_pred))
-            elif round_segment == 'Final4':
-                calibrated_preds[i] = min(0.45, max(0.25, adjusted_pred))
-            else:
-                calibrated_preds[i] = min(0.42, max(0.15, adjusted_pred))
-        else:  # heavy_underdog
-            # Allow more upsets in Final Four (historically seen upsets)
-            if round_segment == 'Final4':
-                calibrated_preds[i] = min(0.40, max(0.20, adjusted_pred))
-            elif round_segment == 'Elite8':
-                calibrated_preds[i] = min(0.38, max(0.15, adjusted_pred))
-            else:
-                calibrated_preds[i] = min(0.35, max(0.10, adjusted_pred))
+            calibrated_preds[i] = min(0.65, max(0.35, calibrated_preds[i]))
+        elif seed_segment in ['slight_underdog', 'underdog', 'heavy_underdog']:
+            calibrated_preds[i] = min(0.55, max(0.15, calibrated_preds[i]))
     
-    # Add confidence boosting for problematic rounds
+    # Add some additional confidence boosting
     for i in range(len(calibrated_preds)):
         current_pred = calibrated_preds[i]
-        current_round = None
         
-        # Get the round if available
-        if tournament_round is not None:
-            current_round = tournament_round[i]
-        
-        # Apply stronger confidence boost for Round64 (where model performs well)
-        if current_round == 'Round64' and 0.4 < current_pred < 0.6:
-            # For Round64, boost confidence more (men's model is 64% accurate here)
-            distance_from_center = abs(current_pred - 0.5)
-            boost_factor = distance_from_center * 3.0
+        # Boost near-50/50 predictions
+        if 0.4 < current_pred < 0.6:
+            distance = abs(current_pred - 0.5)
+            boost_factor = distance * 2.0
             
-            # Apply the boost (preserving direction)
+            # Boost slightly more for rounds known for upsets
+            if tournament_round is not None:
+                round_name = tournament_round[i]
+                if round_name in ['Round64', 'Sweet16']:
+                    boost_factor *= 1.5
+            
+            # Apply boost
             if current_pred > 0.5:
                 calibrated_preds[i] = current_pred + (boost_factor * 0.07)
             else:
                 calibrated_preds[i] = current_pred - (boost_factor * 0.07)
-        
-        # Apply more modest boost to other rounds
-        elif 0.4 < current_pred < 0.6:
-            # Calculate distance from 0.5
-            distance_from_center = abs(current_pred - 0.5)
-            
-            # Calculate boost factor
-            boost_factor = distance_from_center * 2.0
-            
-            # Apply the boost (preserving direction)
-            if current_pred > 0.5:
-                calibrated_preds[i] = current_pred + (boost_factor * 0.05)
-            else:
-                calibrated_preds[i] = current_pred - (boost_factor * 0.05)
-
-    # Add confidence boosting for predictions near the middle
-    for i in range(len(calibrated_preds)):
-        raw_pred = calibrated_preds[i]
-        
-        # For men's tournament - slightly more conservative range
-        if 0.4 < raw_pred < 0.6:
-            # Calculate distance from 0.5
-            distance = abs(raw_pred - 0.5)
-            
-            # More conservative boost for men's tournament (lower overall accuracy)
-            boost_magnitude = distance * 0.5
-            
-            # Apply the boost in the appropriate direction
-            if raw_pred > 0.5:
-                calibrated_preds[i] = raw_pred + boost_magnitude
-            else:
-                calibrated_preds[i] = raw_pred - boost_magnitude
-
-    # Ensure all predictions remain in valid range
+    
+    # Ensure all predictions are within valid range
     calibrated_preds = np.clip(calibrated_preds, 0.001, 0.999)
     
     return calibrated_preds
