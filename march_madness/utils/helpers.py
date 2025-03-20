@@ -6,7 +6,7 @@ from ..features.matchup import (calculate_seed_based_probability, create_upset_s
 from ..models.training import (handle_class_imbalance, gender_specific_feature_selection, 
 create_mens_specific_model, create_womens_specific_model, train_round_specific_models)
 from ..models.evaluation import calibrate_by_expected_round, calibrate_mens_predictions
-from ..models.prediction import run_tournament_simulation_pre_tournament
+from ..models.prediction import run_tournament_simulation_pre_tournament, apply_final_four_seed_rule, apply_late_round_adjustments
 from march_madness.models.common import create_feature_interactions, drop_redundant_features 
 import warnings
 warnings.filterwarnings("ignore")        
@@ -145,15 +145,43 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
         )
         print(f"Balanced training data: {X_train_balanced.shape}")
 
-        # Train model
         print(f"\n15. Training gender-specific ensemble model for {gender} tournaments...")
         if gender == "men's":
-            model = create_mens_specific_model(random_state=3)
+            main_model = create_mens_specific_model(random_state=3)
+            main_model.fit(X_train_balanced, y_train_balanced)
+            
+            # Check if ExpectedRound column exists in training data
+            if 'ExpectedRound' in training_df.columns:
+                print(f"\n15a. Training round-specific models for men's tournaments...")
+                # We need to keep ExpectedRound data for the round-specific training
+                expected_rounds = training_df['ExpectedRound'].values
+                
+                # Add the ExpectedRound to X_train_balanced for round-specific models
+                X_with_rounds = X_train_balanced.copy()
+                X_with_rounds['ExpectedRound'] = expected_rounds 
+                
+                # Get unique tournament rounds
+                tournament_rounds = sorted(training_df['ExpectedRound'].unique())
+                print(f"Found rounds: {tournament_rounds}")
+                
+                # Train specialized models for each round
+                round_models = train_round_specific_models(
+                    X_with_rounds, y_train_balanced, tournament_rounds, gender="men's"
+                )
+                
+                # Create a model dictionary with main model and round models
+                model = {
+                    'main_model': main_model,
+                    'round_models': round_models
+                }
+                print(f"Created {len(round_models)} round-specific models for men's tournament")
+            else:
+                # No round information, just use the main model
+                print("No ExpectedRound column found in training data, using main model only")
+                model = main_model
         else:
             model = create_womens_specific_model(random_state=3)
-            
-        # Fit main ensemble model
-        model.fit(X_train_balanced, y_train_balanced)
+            model.fit(X_train_balanced, y_train_balanced)
             
         print("Models trained")
 
@@ -373,40 +401,56 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
                         main_model = model['main_model']
                         round_models = model['round_models']
                         
-                        # Initialize predictions array
-                        pred_proba = np.zeros(len(prediction_features_reduced))
-                        
                         # Check if we have round information
                         if 'ExpectedRound' in season_predictions.columns:
-                            print(f"Using round-specific models where available")
+                            print(f"Using round-specific models where available in batched mode")
                             
-                            # Make predictions for each sample
-                            for i, (idx, features) in enumerate(prediction_features_reduced.iterrows()):
-                                # Get expected round for this matchup
-                                round_name = season_predictions.iloc[i]['ExpectedRound']
-                                
+                            # Process predictions by round in batches (much faster)
+                            all_rounds = season_predictions['ExpectedRound'].unique()
+                            pred_proba = np.zeros(len(prediction_features_reduced))
+                            
+                            # Get main model predictions for all samples at once
+                            main_preds = main_model.predict_proba(prediction_features_reduced)[:, 1]
+                            
+                            # Apply main model predictions as default
+                            pred_proba = main_preds
+                            
+                            # Update with round-specific predictions where available
+                            for round_name in all_rounds:
                                 if round_name in round_models:
-                                    # Use round-specific model with weight
-                                    round_pred = round_models[round_name].predict_proba(features.values.reshape(1, -1))[0][1]
-                                    main_pred = main_model.predict_proba(features.values.reshape(1, -1))[0][1]
-                                    
-                                    # Blend with more weight to round-specific model in later rounds
-                                    if round_name in ['Championship', 'Final4', 'Elite8', 'Sweet16']:
-                                        blend_weight = 0.7  # 70% round-specific, 30% main model
-                                    else:
-                                        blend_weight = 0.5  # 50-50 blend for earlier rounds
+                                    # Get indices for this round
+                                    round_indices = season_predictions[season_predictions['ExpectedRound'] == round_name].index
+                                    if len(round_indices) == 0:
+                                        continue
                                         
-                                    pred_proba[i] = (blend_weight * round_pred) + ((1-blend_weight) * main_pred)
-                                else:
-                                    # Use main model
-                                    pred_proba[i] = main_model.predict_proba(features.values.reshape(1, -1))[0][1]
+                                    # Get features for this round
+                                    round_features = prediction_features_reduced.loc[round_indices]
+                                    
+                                    # Get round-specific predictions for all samples in this round at once
+                                    round_preds = round_models[round_name].predict_proba(round_features)[:, 1]
+                                    
+                                    # Determine blend weight based on round
+                                    if round_name in ['Championship', 'Final4']:
+                                        blend_weight = 0.85
+                                    elif round_name in ['Elite8', 'Sweet16']:
+                                        blend_weight = 0.7
+                                    else:
+                                        blend_weight = 0.5  
+                                    
+                                    # Blend predictions
+                                    main_batch_preds = main_preds[round_indices]
+                                    blended_preds = (blend_weight * round_preds) + ((1-blend_weight) * main_batch_preds)
+                                    
+                                    # Update the predictions array
+                                    pred_proba[round_indices] = blended_preds
+                                    
+                                    print(f"  Applied {round_name} model to {len(round_indices)} matchups")
                         else:
                             # Use main model for all predictions
                             pred_proba = main_model.predict_proba(prediction_features_reduced)[:, 1]
                     else:
                         # Use standard model (backward compatibility)
                         pred_proba = model.predict_proba(prediction_features_reduced)[:, 1]
-
                     # Apply calibration
                     try:
                         pred_calibrated = calibrate_by_expected_round(
@@ -454,6 +498,17 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
                 print(f"Error in tournament simulation: {e}")
                 print(f"Using direct predictions for season {season}")
                 all_predictions.append(season_predictions)
+
+        # Add at the end of the prediction section, right before returning predictions:
+        if gender == "men's" and 'ExpectedRound' in season_predictions.columns:
+            print("Applying final adjustments for men's late round games...")
+            season_predictions = apply_late_round_adjustments(season_predictions)
+
+        # Right before returning the predictions:
+        if gender == "men's" and 'df_seed' in modeling_data:
+            # For Final4 and Championship, apply seed-based rules which have strong historical success
+            print("Applying seed-based rules for men's Final4 and Championship games...")
+            season_predictions = apply_final_four_seed_rule(season_predictions, modeling_data['df_seed'])
 
         # Combine predictions if any were generated
         if all_predictions:

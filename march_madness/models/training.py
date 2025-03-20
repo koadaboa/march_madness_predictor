@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier, GradientBoostingClassifier
+from sklearn.metrics import accuracy_score
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
@@ -643,58 +644,57 @@ def train_round_specific_models(X_train, y_train, tournament_rounds, gender):
     for round_name in tournament_rounds:
         print(f"Training specialized model for {round_name}...")
         
+        # Ensure ExpectedRound is in the DataFrame
+        if 'ExpectedRound' not in X_train.columns:
+            print(f"  Error: ExpectedRound column not found in training data")
+            continue
+            
         # Filter training data for this round
         round_mask = X_train['ExpectedRound'] == round_name
         if sum(round_mask) < 15:  # Need minimum examples
-            print(f"Insufficient data for {round_name}, using general model")
+            print(f"  Insufficient data for {round_name} ({sum(round_mask)} examples), using general model")
             continue
             
-        X_round = X_train[round_mask]
+        # Remove ExpectedRound before training
+        X_round = X_train[round_mask].drop('ExpectedRound', axis=1)
         y_round = y_train[round_mask]
         
-        # Add upset balance for critical rounds
-        if round_name in key_rounds:
-            # For critical rounds, use balanced class weights or SMOTE
-            from imblearn.over_sampling import SMOTE
-            if sum(y_round) > 3 and len(y_round) - sum(y_round) > 3:  # Need enough samples of each class
-                sm = SMOTE(random_state=42)
-                X_round, y_round = sm.fit_resample(X_round, y_round)
-                print(f"  Applied SMOTE for {round_name} - now {len(X_round)} samples")
+        print(f"  Using {len(X_round)} examples for {round_name}")
         
         # Create optimized models for each round
-        if round_name == 'Sweet16' and gender == "men's":
-            # Sweet16 has been problematic for men (37.5% accuracy)
+        if round_name == 'Final4':
             model = XGBClassifier(
-                n_estimators=500,
+                n_estimators=300,
                 learning_rate=0.03,
-                max_depth=4,
-                subsample=0.85,
-                colsample_bytree=0.8,
-                scale_pos_weight=2.0,  # Favor upsets more
+                max_depth=3,
+                subsample=0.8,
+                colsample_bytree=0.7,
+                scale_pos_weight=1.5,  # Moderate favor for underdogs
                 random_state=42
             )
-        elif round_name == 'Final4' and gender == "women's":
-            # Final4 has been problematic for women (33.3% accuracy)
-            model = LogisticRegression(
-                C=0.7,
-                class_weight='balanced',
-                solver='liblinear',
-                random_state=42
-            )
-        elif round_name in key_rounds:
-            # Other critical rounds get specialized models
-            model = GradientBoostingClassifier(
+        elif round_name == 'Championship':
+            model = LGBMClassifier(
                 n_estimators=250,
                 learning_rate=0.05,
                 max_depth=4,
-                subsample=0.85,
+                num_leaves=16,
+                subsample=0.7,
+                reg_alpha=0.1,
+                reg_lambda=1.2,
+                random_state=42
+            )
+        elif round_name == 'Sweet16' or round_name == 'Elite8':
+            model = GradientBoostingClassifier(
+                n_estimators=200,
+                learning_rate=0.05,
+                max_depth=4,
+                subsample=0.8,
                 random_state=42
             )
         else:
-            # Default round-specific model
             model = RandomForestClassifier(
-                n_estimators=300,
-                max_depth=6,
+                n_estimators=200,
+                max_depth=5,
                 min_samples_split=5,
                 class_weight='balanced',
                 random_state=42
@@ -706,7 +706,13 @@ def train_round_specific_models(X_train, y_train, tournament_rounds, gender):
         
         # Evaluate on training data
         train_preds = model.predict(X_round)
-        train_accuracy = accuracy_score(y_round, train_preds)
-        print(f"  {round_name} model training accuracy: {train_accuracy:.4f}")
+        if 'accuracy_score' in globals():
+            train_accuracy = accuracy_score(y_round, train_preds)
+            print(f"  {round_name} model training accuracy: {train_accuracy:.4f}")
+        else:
+            correct = sum(train_preds == y_round)
+            total = len(y_round)
+            train_accuracy = correct / total if total > 0 else 0
+            print(f"  {round_name} model training accuracy: {train_accuracy:.4f} ({correct}/{total})")
         
     return round_models

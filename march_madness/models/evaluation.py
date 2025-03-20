@@ -308,14 +308,23 @@ def calibrate_mens_predictions(predictions, X_test, seed_diff_col='SeedDiff'):
     # Update round factors based on empirical performance
     # Significantly adjust Final Four and Sweet 16 where model underperforms
         round_factors = {
-        'Championship': {  # Men's championship is weaker (40% accuracy)
-            'heavy_favorite': 0.90,  # Reduce confidence
-            'favorite': 0.85,
+        'Championship': {  # Men's championship is weaker (50% accuracy)
+            'heavy_favorite': 0.80,  # Reduce confidence significantly
+            'favorite': 0.80,
             'slight_favorite': 0.85,
             'even': 1.0,
-            'slight_underdog': 1.10,  # Boost underdogs
-            'underdog': 1.15,
-            'heavy_underdog': 1.20
+            'slight_underdog': 1.15,  # Boost underdogs more
+            'underdog': 1.20,
+            'heavy_underdog': 1.25
+        },
+        'Final4': {  # Men's Final 4 is at 50% accuracy
+            'heavy_favorite': 0.80,  # Heavily discount favorites
+            'favorite': 0.80,
+            'slight_favorite': 0.85,
+            'even': 1.0,
+            'slight_underdog': 1.20,  # Much stronger boost for underdogs
+            'underdog': 1.25,
+            'heavy_underdog': 1.30
         },
         'Elite8': {  # Men's Elite 8 is weaker (41.7% accuracy)
             'heavy_favorite': 0.90,
