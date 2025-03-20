@@ -4,12 +4,12 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import brier_score_loss, roc_auc_score, log_loss
 from ..features.matchup import (calculate_seed_based_probability, create_upset_specific_features)
 from ..models.training import (handle_class_imbalance, gender_specific_feature_selection, 
-create_mens_specific_model, create_womens_specific_model, train_round_specific_models)
+create_mens_specific_model, create_womens_specific_model, adjust_for_upset_potential, accuracy_maximizing_push)
 from ..models.evaluation import calibrate_by_expected_round, calibrate_mens_predictions
 from ..models.prediction import run_tournament_simulation_pre_tournament
 from march_madness.models.common import create_feature_interactions, drop_redundant_features 
 import warnings
-warnings.filterwarnings("ignore")        
+warnings.filterwarnings("ignore")
 
 def train_and_predict_model(modeling_data, gender, training_seasons, validation_season, prediction_seasons,
                            model=None, feature_cols=None, scaler=None, dropped_features=None):
@@ -418,6 +418,10 @@ def train_and_predict_model(modeling_data, gender, training_seasons, validation_
                     except Exception as e:
                         print(f"Error in calibration: {e}")
                         pred_calibrated = pred_proba
+
+                    if gender == "men's":
+                        pred_calibrated = adjust_for_upset_potential(pred_calibrated, prediction_features_reduced)
+                        pred_calibrated = accuracy_maximizing_push(pred_calibrated)
 
                     # Add predictions
                     season_predictions['Pred'] = pred_calibrated

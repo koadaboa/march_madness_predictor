@@ -28,23 +28,23 @@ def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff', g
     if gender == "women's":
         # Women's tournament calibration values - MORE EXTREME FOR FAVORITES
         round_factors = {
-            'Championship': {  # Women are very predictable in championship (80% accuracy)
-                'heavy_favorite': 1.15,  # Much more confident in heavy favorites
-                'favorite': 1.10,
-                'slight_favorite': 1.05,
+            'Championship': {  # Women's championship has 50% accuracy, not 80%
+                'heavy_favorite': 1.05,  # Much less confident in favorites
+                'favorite': 1.03,
+                'slight_favorite': 1.01,
                 'even': 1.0,
-                'slight_underdog': 0.9,
-                'underdog': 0.85,
-                'heavy_underdog': 0.8
+                'slight_underdog': 0.99,
+                'underdog': 0.97,
+                'heavy_underdog': 0.95
             },
-            'Final4': {  # Women's Final Four very unpredictable (33% accuracy)
-                'heavy_favorite': 0.9,  # Be conservative with favorites
-                'favorite': 0.85,
-                'slight_favorite': 0.85,
+            'Final4': {  # Women's Final Four extremely unpredictable (25% accuracy)
+                'heavy_favorite': 0.85,  # Be even more conservative with favorites
+                'favorite': 0.80,
+                'slight_favorite': 0.75,
                 'even': 1.0,
-                'slight_underdog': 1.15,  # Boost underdogs
-                'underdog': 1.2,
-                'heavy_underdog': 1.25
+                'slight_underdog': 1.25,  # Boost underdogs more
+                'underdog': 1.30,
+                'heavy_underdog': 1.35
             },
             'Elite8': {  # Women's Elite 8 is very predictable (87.5% accuracy)
                 'heavy_favorite': 1.30,  # Much higher confidence
@@ -86,11 +86,11 @@ def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff', g
         
         # Momentum factors
         momentum_factors = {
-            'strong_form': 1.12,
-            'good_form': 1.06,
+            'strong_form': 1.18,  # Increase from 1.12
+            'good_form': 1.10,    # Increase from 1.06
             'neutral_form': 1.0,
-            'poor_form': 0.95,
-            'weak_form': 0.90
+            'poor_form': 0.90,    # Decrease from 0.95
+            'weak_form': 0.85  
         }
     else:
         # Men's tournament calibration values
@@ -307,61 +307,70 @@ def calibrate_mens_predictions(predictions, X_test, seed_diff_col='SeedDiff'):
     
     # Adjust round factors to be more upset-friendly
     round_factors = {
-        'Round64': {  # More aggressive upset potential in first round
-            'heavy_favorite': 0.90,  # Reduce confidence in top seeds
-            'favorite': 0.85,
-            'slight_favorite': 0.85,
-            'even': 1.0,
-            'slight_underdog': 1.15,  # Boost underdogs
-            'underdog': 1.20,
-            'heavy_underdog': 1.25
-        },
-        'Sweet16': {  # Known for upsets in men's tournament
-            'heavy_favorite': 0.85,  # Much less confidence for top seeds
-            'favorite': 0.80,
-            'slight_favorite': 0.80,
-            'even': 1.0,
-            'slight_underdog': 1.15,  # Significant boost for underdogs
-            'underdog': 1.20,
-            'heavy_underdog': 1.25
-        },
-        'Elite8': {  # Moderate upset potential
-            'heavy_favorite': 0.90,
-            'favorite': 0.85,
-            'slight_favorite': 0.85,
-            'even': 1.0,
-            'slight_underdog': 1.10,
-            'underdog': 1.15,
-            'heavy_underdog': 1.20
-        },
-        'Final4': {  # Very unpredictable round
-            'heavy_favorite': 0.85,
-            'favorite': 0.80,
-            'slight_favorite': 0.80,
-            'even': 1.0,
-            'slight_underdog': 1.15,
-            'underdog': 1.20,
-            'heavy_underdog': 1.25
-        },
-        'Championship': {  # More conservative, but still upset-friendly
-            'heavy_favorite': 0.90,
-            'favorite': 0.85,
-            'slight_favorite': 0.85,
-            'even': 1.0,
-            'slight_underdog': 1.10,
-            'underdog': 1.15,
-            'heavy_underdog': 1.20
-        },
-        'default': {
-            'heavy_favorite': 0.90,
-            'favorite': 0.85,
-            'slight_favorite': 0.85,
-            'even': 1.0,
-            'slight_underdog': 1.10,
-            'underdog': 1.15,
-            'heavy_underdog': 1.20
+            'Round64': {
+                'heavy_favorite': 1.25,  # Very strong confidence in top seeds
+                'favorite': 1.20,
+                'slight_favorite': 1.10,
+                'even': 1.0,
+                'slight_underdog': 0.80,
+                'underdog': 0.70,
+                'heavy_underdog': 0.60
+            },
+            'Round32': {
+                'heavy_favorite': 1.25,  # Increased from 1.15
+                'favorite': 1.20,        # Increased from 1.10
+                'slight_favorite': 1.15, # Increased from 1.05
+                'even': 1.0,
+                'slight_underdog': 0.85, # Decreased from 0.95
+                'underdog': 0.80,        # Decreased from 0.90
+                'heavy_underdog': 0.75   # Decreased from 0.85
+            },
+            'Sweet16': {
+                'heavy_favorite': 1.0,  # Neutral for Sweet 16
+                'favorite': 1.0,
+                'slight_favorite': 1.0,
+                'even': 1.0,
+                'slight_underdog': 1.0,
+                'underdog': 1.0,
+                'heavy_underdog': 1.0
+            },
+            'Elite8': {
+                'heavy_favorite': 0.95,    # Less extreme than before
+                'favorite': 0.97,          # Actually reduce confidence a bit
+                'slight_favorite': 0.99,   # Almost neutral
+                'even': 1.0,
+                'slight_underdog': 1.01,   # Slight boost to underdogs
+                'underdog': 1.03,          # Slightly favor underdogs
+                'heavy_underdog': 1.05 
+            },
+            'Final4': {
+                'heavy_favorite': 1.0,  # Neutral for Final Four
+                'favorite': 1.0,
+                'slight_favorite': 1.0,
+                'even': 1.0, 
+                'slight_underdog': 1.0,
+                'underdog': 1.0,
+                'heavy_underdog': 1.0
+            },
+            'Championship': {
+                'heavy_favorite': 1.30,  # Very strong favorite bias for Championship
+                'favorite': 1.25,
+                'slight_favorite': 1.20,
+                'even': 1.0,
+                'slight_underdog': 0.80,
+                'underdog': 0.75,
+                'heavy_underdog': 0.70
+            },
+            'default': {
+                'heavy_favorite': 1.15,
+                'favorite': 1.10,
+                'slight_favorite': 1.05,
+                'even': 1.0,
+                'slight_underdog': 0.95,
+                'underdog': 0.90,
+                'heavy_underdog': 0.85
+            }
         }
-    }
     
     # Apply the calibration logic
     for i in range(len(calibrated_preds)):
@@ -427,6 +436,20 @@ def calibrate_mens_predictions(predictions, X_test, seed_diff_col='SeedDiff'):
         
         # Apply the combined factor
         calibrated_preds[i] = raw_pred * combined_factor
+
+        current_round = 'default'
+        if tournament_round is not None:
+            round_name = tournament_round[i]
+            if round_name in round_factors:
+                current_round = round_name
+        
+        # Make more decisive predictions for early rounds (where we have more games)
+        if current_round in ['Round64', 'Round32']:
+            # More aggressive threshold adjustment
+            if calibrated_preds[i] > 0.53:  # If leaning toward Team1 winning
+                calibrated_preds[i] = min(0.95, calibrated_preds[i] + 0.07)
+            elif calibrated_preds[i] < 0.47:  # If leaning toward Team1 losing
+                calibrated_preds[i] = max(0.05, calibrated_preds[i] - 0.07)
         
         # Ensure predictions stay within reasonable bounds
         if seed_segment == 'heavy_favorite':
@@ -935,3 +958,98 @@ def evaluate_predictions_by_tournament_round(predictions_df, actual_results_df, 
     else:
         print(f"No matching predictions found for {gender} tournaments")
         return None
+
+# Replace all the specialized functions with this simplified approach
+def optimal_calibration_for_mens(predictions, X_test, seed_diff_col='SeedDiff'):
+    """Optimized calibration that balances accuracy and upset detection"""
+    calibrated_preds = np.copy(predictions)
+    
+    # Get seed differences and round information
+    seed_diffs = X_test[seed_diff_col].values if isinstance(X_test, pd.DataFrame) else X_test[:, seed_diff_col]
+    tournament_round = None
+    if isinstance(X_test, pd.DataFrame) and 'ExpectedRound' in X_test.columns:
+        tournament_round = X_test['ExpectedRound'].values
+    
+    # Apply calibration with different factors for each round
+    for i in range(len(calibrated_preds)):
+        # Determine seed segment
+        seed_diff = seed_diffs[i]
+        if seed_diff <= -10:
+            seed_segment = 'heavy_favorite'
+        elif seed_diff <= -5:
+            seed_segment = 'favorite'
+        elif seed_diff <= -1:
+            seed_segment = 'slight_favorite'
+        elif seed_diff < 1:
+            seed_segment = 'even'
+        elif seed_diff < 5:
+            seed_segment = 'slight_underdog'
+        elif seed_diff < 10:
+            seed_segment = 'underdog'
+        else:
+            seed_segment = 'heavy_underdog'
+        
+        # Determine round
+        current_round = 'default'
+        if tournament_round is not None:
+            round_name = tournament_round[i]
+            if round_name in ['Round64', 'Round32', 'Sweet16', 'Elite8', 'Final4', 'Championship']:
+                current_round = round_name
+        
+        # Get calibration factor based on round and seed segment
+        if current_round == 'Round64':
+            if seed_segment in ['heavy_favorite', 'favorite']:
+                # Strong boost for favorites in first round
+                calibrated_preds[i] = min(0.95, calibrated_preds[i] * 1.15)
+            elif seed_segment in ['heavy_underdog', 'underdog']:
+                # Reduce confidence in first round underdogs
+                calibrated_preds[i] = max(0.10, calibrated_preds[i] * 0.85)
+        
+        elif current_round == 'Round32':
+            # More balanced approach for Round32 (where we had issues)
+            if calibrated_preds[i] > 0.65:
+                # Cap high confidence predictions
+                calibrated_preds[i] = 0.65 + ((calibrated_preds[i] - 0.65) * 0.5)
+            elif calibrated_preds[i] < 0.35:
+                # Cap low confidence predictions
+                calibrated_preds[i] = 0.35 - ((0.35 - calibrated_preds[i]) * 0.5)
+        
+        elif current_round in ['Elite8', 'Final4', 'Championship']:
+            # Later rounds have more upsets - be more balanced
+            if calibrated_preds[i] > 0.5:
+                # Reduce favorite confidence
+                calibrated_preds[i] = 0.5 + ((calibrated_preds[i] - 0.5) * 0.8)
+            else:
+                # Increase underdog chances
+                calibrated_preds[i] = 0.5 - ((0.5 - calibrated_preds[i]) * 0.8)
+    
+    # Special upset handling based on classic matchups
+    if isinstance(X_test, pd.DataFrame) and 'Team1Seed' in X_test.columns and 'Team2Seed' in X_test.columns:
+        for i in range(len(calibrated_preds)):
+            team1_seed = X_test.iloc[i]['Team1Seed']
+            team2_seed = X_test.iloc[i]['Team2Seed']
+            
+            # Classic upset matchups
+            classic_upset = ((team1_seed == 12 and team2_seed == 5) or
+                            (team1_seed == 11 and team2_seed == 6) or
+                            (team1_seed == 10 and team2_seed == 7) or
+                            (team1_seed == 9 and team2_seed == 8))
+            
+            # Adjust for classic upset matchups
+            if classic_upset:
+                if calibrated_preds[i] > 0.65:
+                    # Cap high confidence against classic upset
+                    calibrated_preds[i] = 0.65
+                elif 0.45 < calibrated_preds[i] < 0.55:
+                    # Give slight edge to upset potential
+                    calibrated_preds[i] = 0.45
+    
+    # Final mild push away from 0.5 for decisive predictions
+    for i in range(len(calibrated_preds)):
+        if calibrated_preds[i] > 0.55:  # Clear favor to Team1
+            calibrated_preds[i] = min(0.95, calibrated_preds[i] + 0.05)
+        elif calibrated_preds[i] < 0.45:  # Clear favor to Team2
+            calibrated_preds[i] = max(0.05, calibrated_preds[i] - 0.05)
+    
+    # Ensure all predictions remain in valid range
+    return np.clip(calibrated_preds, 0.001, 0.999)

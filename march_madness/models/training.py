@@ -736,3 +736,62 @@ def train_round_specific_models(X_train, y_train, tournament_rounds, gender):
         print(f"  {round_name} model training accuracy: {train_accuracy:.4f}")
         
     return round_models
+
+def accuracy_maximizing_push(predictions, threshold=0.5):
+    """
+    Make a more balanced push that preserves some upset detection ability
+    """
+    pushed_preds = np.copy(predictions)
+    
+    for i in range(len(pushed_preds)):
+        original = pushed_preds[i]
+        
+        # If it's a strong favorite (high probability), push it higher but more gently
+        if original > 0.65:  # Clear favorite
+            pushed_preds[i] = min(0.95, original + 0.05)
+        # If it's a moderate favorite, push slightly
+        elif original > 0.55:
+            pushed_preds[i] = min(0.90, original + 0.03)
+        # If it's a strong underdog prediction, preserve it
+        elif original < 0.33:
+            pushed_preds[i] = max(0.05, original - 0.05)  # Boost underdog confidence
+        # If it's close to 0.5 but slightly favoring underdog, preserve some upset potential
+        elif 0.33 <= original < 0.47:
+            # Don't modify these - these are our potential upset predictions
+            pass
+        # If it's very close to 0.5, make a small push based on direction
+        elif 0.47 <= original < 0.53:
+            # Make a small push based on which side of 0.5 we're on
+            if original >= 0.5:
+                pushed_preds[i] = original + 0.03
+            else:
+                pushed_preds[i] = original - 0.03
+    
+    return pushed_preds
+
+def adjust_for_upset_potential(predictions, X_test):
+    """Specifically designed to preserve some upset prediction capability"""
+    adjusted_preds = np.copy(predictions)
+    
+    if 'Team1Seed' in X_test.columns and 'Team2Seed' in X_test.columns:
+        for i in range(len(adjusted_preds)):
+            team1_seed = X_test.iloc[i]['Team1Seed']
+            team2_seed = X_test.iloc[i]['Team2Seed']
+            
+            # Classic upset matchups
+            classic_upset = ((team1_seed == 12 and team2_seed == 5) or
+                            (team1_seed == 11 and team2_seed == 6) or
+                            (team1_seed == 10 and team2_seed == 7) or
+                            (team1_seed == 9 and team2_seed == 8))
+            
+            # If this is a classic upset matchup and prediction is strongly against upset
+            if classic_upset and adjusted_preds[i] > 0.7:
+                # Reduce the confidence to give some chance for upset
+                adjusted_preds[i] = 0.65
+            
+            # If prediction is somewhat close to upset threshold
+            if classic_upset and 0.45 <= adjusted_preds[i] <= 0.6:
+                # Pull closer to 0.5 to give some upset potential
+                adjusted_preds[i] = 0.48
+    
+    return adjusted_preds

@@ -1222,12 +1222,13 @@ def create_upset_specific_features(X, gender="men's"):
         ).astype(int)
     
     # Momentum interactions specific to men's upset potential
-    if all(col in X.columns for col in ['Team1WinRate_Last10', 'SeedDiff']):
+    momentum_col = next((col for col in X.columns if col.startswith('Team1Win') and 'Last' in col), None)
+    if momentum_col and 'SeedDiff' in X.columns:
         # Create an interaction term that boosts underdog momentum
         X_enhanced['UnderdogMomentumBoost'] = np.where(
             X['SeedDiff'] > 0,  # Team1 is underdog
-            X['Team1WinRate_Last10'] * np.sqrt(abs(X['SeedDiff'])),
-            X['Team2WinRate_Last10'] * np.sqrt(abs(X['SeedDiff']))
+            X[momentum_col] * np.sqrt(abs(X['SeedDiff'])),
+            X[momentum_col.replace('Team1', 'Team2')] * np.sqrt(abs(X['SeedDiff']))
         )
     
     # 3-point shooting upset factor (critical in men's basketball)
@@ -1246,6 +1247,39 @@ def create_upset_specific_features(X, gender="men's"):
             X['Team1DefEfficiency'] - X['Team2DefEfficiency']
         )
     
+    # Add men's specific features
+    if gender == "men's":
+        # More conservative approach that checks for columns before using them
+        required_cols = ['Team1Seed', 'Team2Seed', 'Team1WinRate', 'Team2WinRate',
+                        'Team1DefEfficiency', 'Team2DefEfficiency', 'Team1FG3Pct']
+        
+        if all(col in X.columns for col in required_cols):
+            # Basic conditions for upsets that don't require missing columns
+            X_enhanced['HighPrecisionUpset'] = (
+                # 11-seed over 6-seed with good 3-point shooting
+                ((X['Team1Seed'] == 11) & (X['Team2Seed'] == 6) & 
+                (X['Team1FG3Pct'] > 0.36) & (X['Team1WinRate'] > 0.6)) |
+                # 12-seed over 5-seed with basic conditions
+                ((X['Team1Seed'] == 12) & (X['Team2Seed'] == 5) & 
+                (X['Team1DefEfficiency'] < X['Team2DefEfficiency'])) |
+                # 10-seed over 7-seed with defensive edge
+                ((X['Team1Seed'] == 10) & (X['Team2Seed'] == 7) & 
+                (X['Team1DefEfficiency'] < X['Team2DefEfficiency'] - 2) & (X['Team1WinRate'] > 0.65))
+            ).astype(int)
+        else:
+            # Fallback with simpler conditions if missing required columns
+            X_enhanced['HighPrecisionUpset'] = X_enhanced.get('UpsetZone_MajorUpsetsV1', 0)
+    
+    # Add women's specific features
+    if gender == "women's":
+        if 'Team1Seed' in X.columns and 'Team2Seed' in X.columns:
+            # Women's tournament specific upset zones
+            X_enhanced['WomensUpsetZone_Major'] = (
+                ((X['Team1Seed'] == 10) & (X['Team2Seed'] == 7)) |
+                ((X['Team1Seed'] == 11) & (X['Team2Seed'] == 6)) |
+                ((X['Team1Seed'] == 12) & (X['Team2Seed'] == 5))
+            ).astype(int)
+    
     # Composite upset likelihood score
     upset_indicators = []
     
@@ -1258,18 +1292,28 @@ def create_upset_specific_features(X, gender="men's"):
     if 'ThreePointUpsetFactor' in X_enhanced.columns:
         upset_indicators.append(
             np.where(X_enhanced['ThreePointUpsetFactor'] > 0, 
-                     X_enhanced['ThreePointUpsetFactor'] * 0.3, 0)
+                    X_enhanced['ThreePointUpsetFactor'] * 0.3, 0)
         )
     
     if 'DefensiveUpsetFactor' in X_enhanced.columns:
         upset_indicators.append(
             np.where(X_enhanced['DefensiveUpsetFactor'] > 0, 
-                     X_enhanced['DefensiveUpsetFactor'] * 0.2, 0)
+                    X_enhanced['DefensiveUpsetFactor'] * 0.2, 0)
         )
     
     if 'UpsetZone_MajorUpsetsV1' in X_enhanced.columns:
         upset_indicators.append(
             X_enhanced['UpsetZone_MajorUpsetsV1'] * 0.15
+        )
+    
+    if 'HighPrecisionUpset' in X_enhanced.columns:
+        upset_indicators.append(
+            X_enhanced['HighPrecisionUpset'] * 0.35  # Higher weight for high-precision predictions
+        )
+    
+    if gender == "women's" and 'WomensUpsetZone_Major' in X_enhanced.columns:
+        upset_indicators.append(
+            X_enhanced['WomensUpsetZone_Major'] * 0.25
         )
     
     # Combine indicators
