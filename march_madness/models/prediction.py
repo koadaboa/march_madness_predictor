@@ -251,6 +251,7 @@ def combine_predictions(mens_predictions, womens_predictions):
 def apply_final_four_seed_rule(predictions_df, seed_data):
     """Apply seed-based rules for Final4 and Championship games"""
     adjusted = predictions_df.copy()
+    seed_improved = 0
     
     # Process each prediction row
     for i, row in adjusted.iterrows():
@@ -262,32 +263,41 @@ def apply_final_four_seed_rule(predictions_df, seed_data):
                                        (seed_data['TeamID'] == row['Team2ID'])]
             
             if len(team1_seed_row) > 0 and len(team2_seed_row) > 0:
-                # Extract numeric seeds (e.g., 'W01' -> 1)
-                seed1 = int(team1_seed_row['Seed'].iloc[0][1:3]) if len(team1_seed_row['Seed'].iloc[0]) >= 3 else 16
-                seed2 = int(team2_seed_row['Seed'].iloc[0][1:3]) if len(team2_seed_row['Seed'].iloc[0]) >= 3 else 16
-                
-                # Final4 and Championship historical patterns:
-                # 1. Lower seeds (better teams) tend to win more often than model predicts
-                # 2. 1-seeds especially strong in Final4
-                # 3. For very close seeds, the game is essentially a coin flip
-                
-                if seed1 < seed2:  # Team1 is better seed
-                    if seed1 == 1:  # 1-seeds strong in Final4
-                        adjusted.loc[i, 'Pred'] = 0.7
-                    elif seed1 <= 3:  # Top seeds also strong
-                        adjusted.loc[i, 'Pred'] = 0.65
-                    else:  # Other seeds still get advantage but less
-                        adjusted.loc[i, 'Pred'] = 0.58
-                elif seed2 < seed1:  # Team2 is better seed
-                    if seed2 == 1:  # 1-seeds strong in Final4
-                        adjusted.loc[i, 'Pred'] = 0.3
-                    elif seed2 <= 3:  # Top seeds also strong
-                        adjusted.loc[i, 'Pred'] = 0.35
-                    else:  # Other seeds still get advantage but less
-                        adjusted.loc[i, 'Pred'] = 0.42
-                else:  # Equal seeds, close to 50-50
-                    adjusted.loc[i, 'Pred'] = 0.51 if row['Pred'] > 0.5 else 0.49
+                try:
+                    # Extract numeric seeds (e.g., 'W01' -> 1)
+                    seed1 = int(team1_seed_row['Seed'].iloc[0][1:3]) if len(team1_seed_row['Seed'].iloc[0]) >= 3 else 16
+                    seed2 = int(team2_seed_row['Seed'].iloc[0][1:3]) if len(team2_seed_row['Seed'].iloc[0]) >= 3 else 16
                     
+                    # Based on historical NCAA Tournament Final Four data (1985-2023):
+                    # 1-seeds win ~70% of their Final Four games
+                    # 2-seeds win ~60% of their Final Four games
+                    # 3+ seeds are at roughly 50% or below
+                    
+                    if seed1 < seed2:  # Team1 is better seed
+                        if seed1 == 1:  # 1-seeds very strong in Final4
+                            adjusted.loc[i, 'Pred'] = 0.78 if row['ExpectedRound'] == 'Final4' else 0.72
+                            seed_improved += 1
+                        elif seed1 == 2:  # 2-seeds also strong
+                            adjusted.loc[i, 'Pred'] = 0.68 if row['ExpectedRound'] == 'Final4' else 0.62
+                            seed_improved += 1
+                        elif seed1 <= 4:  # Other top seeds get some advantage
+                            adjusted.loc[i, 'Pred'] = 0.60
+                            seed_improved += 1
+                    elif seed2 < seed1:  # Team2 is better seed
+                        if seed2 == 1:  # 1-seeds very strong in Final4
+                            adjusted.loc[i, 'Pred'] = 0.22 if row['ExpectedRound'] == 'Final4' else 0.28
+                            seed_improved += 1
+                        elif seed2 == 2:  # 2-seeds also strong
+                            adjusted.loc[i, 'Pred'] = 0.32 if row['ExpectedRound'] == 'Final4' else 0.38
+                            seed_improved += 1
+                        elif seed2 <= 4:  # Other top seeds get some advantage
+                            adjusted.loc[i, 'Pred'] = 0.40
+                            seed_improved += 1
+                except:
+                    # If there's any error, just preserve the original prediction
+                    pass
+    
+    print(f"Applied seed-based adjustments to {seed_improved} Final4/Championship matchups")
     return adjusted
 
 def apply_late_round_adjustments(predictions_df):
