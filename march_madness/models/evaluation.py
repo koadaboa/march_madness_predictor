@@ -267,227 +267,33 @@ def calibrate_by_expected_round(predictions, X_test, seed_diff_col='SeedDiff', g
     return calibrated_preds
 
 def calibrate_mens_predictions(predictions, X_test, seed_diff_col='SeedDiff'):
-    """
-    Enhanced calibration specifically for men's tournament that addresses
-    the issues identified in Final Four, Sweet 16, and upset detection
-    
-    Args:
-        predictions: Raw prediction probabilities
-        X_test: Test features DataFrame
-        seed_diff_col: Column name for seed difference
-        
-    Returns:
-        Calibrated predictions
-    """   
     calibrated_preds = np.copy(predictions)
     
-    # Extract important features for calibration
-    seed_diffs = X_test[seed_diff_col].values if isinstance(X_test, pd.DataFrame) else X_test[:, seed_diff_col]
-    
-    # Get tournament round if available
-    tournament_round = None
-    if isinstance(X_test, pd.DataFrame) and 'ExpectedRound' in X_test.columns:
-        tournament_round = X_test['ExpectedRound'].values
-    
-    # Extract defensive and shooting metrics if available
-    def_metrics = {}
-    shooting_metrics = {}
-    
-    for metric in ['Team1DefEfficiency', 'Team2DefEfficiency', 'DefEfficiencyDiff', 
-                  'Team1FG3Pct', 'Team2FG3Pct', 'Team1WinRate', 'Team2WinRate',
-                  'WinRateDiff', 'NetEfficiencyDiff']:
-        if metric in X_test.columns:
-            if 'Def' in metric:
-                def_metrics[metric] = X_test[metric].values
-            elif 'FG3' in metric:
-                shooting_metrics[metric] = X_test[metric].values
-            elif metric in ['Team1WinRate', 'Team2WinRate', 'WinRateDiff', 'NetEfficiencyDiff']:
-                # Store these common metrics
-                def_metrics[metric] = X_test[metric].values
-    
-    # Adjust round factors to be more upset-friendly
-    round_factors = {
-            'Round64': {
-                'heavy_favorite': 1.25,  # Very strong confidence in top seeds
-                'favorite': 1.20,
-                'slight_favorite': 1.10,
-                'even': 1.0,
-                'slight_underdog': 0.80,
-                'underdog': 0.70,
-                'heavy_underdog': 0.60
-            },
-            'Round32': {
-                'heavy_favorite': 1.25,  # Increased from 1.15
-                'favorite': 1.20,        # Increased from 1.10
-                'slight_favorite': 1.15, # Increased from 1.05
-                'even': 1.0,
-                'slight_underdog': 0.85, # Decreased from 0.95
-                'underdog': 0.80,        # Decreased from 0.90
-                'heavy_underdog': 0.75   # Decreased from 0.85
-            },
-            'Sweet16': {
-                'heavy_favorite': 1.0,  # Neutral for Sweet 16
-                'favorite': 1.0,
-                'slight_favorite': 1.0,
-                'even': 1.0,
-                'slight_underdog': 1.0,
-                'underdog': 1.0,
-                'heavy_underdog': 1.0
-            },
-            'Elite8': {
-                'heavy_favorite': 0.95,    # Less extreme than before
-                'favorite': 0.97,          # Actually reduce confidence a bit
-                'slight_favorite': 0.99,   # Almost neutral
-                'even': 1.0,
-                'slight_underdog': 1.01,   # Slight boost to underdogs
-                'underdog': 1.03,          # Slightly favor underdogs
-                'heavy_underdog': 1.05 
-            },
-            'Final4': {
-                'heavy_favorite': 1.0,  # Neutral for Final Four
-                'favorite': 1.0,
-                'slight_favorite': 1.0,
-                'even': 1.0, 
-                'slight_underdog': 1.0,
-                'underdog': 1.0,
-                'heavy_underdog': 1.0
-            },
-            'Championship': {
-                'heavy_favorite': 1.30,  # Very strong favorite bias for Championship
-                'favorite': 1.25,
-                'slight_favorite': 1.20,
-                'even': 1.0,
-                'slight_underdog': 0.80,
-                'underdog': 0.75,
-                'heavy_underdog': 0.70
-            },
-            'default': {
-                'heavy_favorite': 1.15,
-                'favorite': 1.10,
-                'slight_favorite': 1.05,
-                'even': 1.0,
-                'slight_underdog': 0.95,
-                'underdog': 0.90,
-                'heavy_underdog': 0.85
-            }
-        }
-    
-    # Apply the calibration logic
+    # Enhanced calibration for different tournament stages
     for i in range(len(calibrated_preds)):
-        raw_pred = calibrated_preds[i]
-        seed_diff = seed_diffs[i]
+        # Get tournament round information
+        # IMPORTANT: Safely access round information
+        round_name = X_test.iloc[i]['ExpectedRound'] if 'ExpectedRound' in X_test.columns else 'default'
+        seed_diff = X_test.iloc[i][seed_diff_col]
         
-        # Determine seed segment
-        if seed_diff <= -10:
-            seed_segment = 'heavy_favorite'
-        elif seed_diff <= -5:
-            seed_segment = 'favorite'
-        elif seed_diff <= -1:
-            seed_segment = 'slight_favorite'
-        elif seed_diff < 1:
-            seed_segment = 'even'
-        elif seed_diff < 5:
-            seed_segment = 'slight_underdog'
-        elif seed_diff < 10:
-            seed_segment = 'underdog'
-        else:
-            seed_segment = 'heavy_underdog'
+        # Staged calibration with round-specific adjustments
+        if round_name == 'Championship':
+            # Very conservative for championship
+            # Confidence boost for clear favorites/underdogs
+            if calibrated_preds[i] > 0.7:
+                calibrated_preds[i] = 0.85
+            elif calibrated_preds[i] < 0.3:
+                calibrated_preds[i] = 0.15
         
-        # Determine round
-        current_round = 'default'
-        if tournament_round is not None:
-            round_name = tournament_round[i]
-            if round_name in round_factors:
-                current_round = round_name
-        
-        # Get calibration factor
-        base_factor = round_factors[current_round][seed_segment]
-        
-        # Additional adjustments based on other metrics
-        defensive_factor = 1.0
-        if 'Team1DefEfficiency' in def_metrics and 'Team2DefEfficiency' in def_metrics:
-            team1_def = def_metrics['Team1DefEfficiency'][i]
-            team2_def = def_metrics['Team2DefEfficiency'][i]
-            
-            # Lower defensive efficiency means better defense
-            if team1_def < team2_def:
-                def_advantage = min((team2_def - team1_def) / team2_def, 0.5)
-                defensive_factor = 1.0 + (def_advantage * 0.3)
-            else:
-                def_advantage = min((team1_def - team2_def) / team1_def, 0.5)
-                defensive_factor = 1.0 - (def_advantage * 0.3)
-        
-        # 3-point shooting factor
-        shooting_factor = 1.0
-        if 'Team1FG3Pct' in shooting_metrics and 'Team2FG3Pct' in shooting_metrics:
-            team1_3pt = shooting_metrics['Team1FG3Pct'][i]
-            team2_3pt = shooting_metrics['Team2FG3Pct'][i]
-            
-            # Higher is better for 3-point shooting
-            if team1_3pt > team2_3pt:
-                shooting_advantage = min((team1_3pt - team2_3pt) / team2_3pt, 0.5)
-                shooting_factor = 1.0 + (shooting_advantage * 0.3)
-            else:
-                shooting_advantage = min((team2_3pt - team1_3pt) / team1_3pt, 0.5)
-                shooting_factor = 1.0 - (shooting_advantage * 0.3)
-        
-        # Combine all factors
-        combined_factor = base_factor * defensive_factor * shooting_factor
-        
-        # Apply the combined factor
-        calibrated_preds[i] = raw_pred * combined_factor
-
-        current_round = 'default'
-        if tournament_round is not None:
-            round_name = tournament_round[i]
-            if round_name in round_factors:
-                current_round = round_name
-        
-        # Make more decisive predictions for early rounds (where we have more games)
-        if current_round in ['Round64', 'Round32']:
-            # More aggressive threshold adjustment
-            if calibrated_preds[i] > 0.53:  # If leaning toward Team1 winning
-                calibrated_preds[i] = min(0.95, calibrated_preds[i] + 0.07)
-            elif calibrated_preds[i] < 0.47:  # If leaning toward Team1 losing
-                calibrated_preds[i] = max(0.05, calibrated_preds[i] - 0.07)
-        
-        # Ensure predictions stay within reasonable bounds
-        if seed_segment == 'heavy_favorite':
-            calibrated_preds[i] = min(0.95, max(0.6, calibrated_preds[i]))
-        elif seed_segment == 'favorite':
-            calibrated_preds[i] = min(0.90, max(0.5, calibrated_preds[i]))
-        elif seed_segment == 'slight_favorite':
-            calibrated_preds[i] = min(0.85, max(0.45, calibrated_preds[i]))
-        elif seed_segment == 'even':
-            calibrated_preds[i] = min(0.65, max(0.35, calibrated_preds[i]))
-        elif seed_segment in ['slight_underdog', 'underdog', 'heavy_underdog']:
-            calibrated_preds[i] = min(0.55, max(0.15, calibrated_preds[i]))
+        elif round_name == 'Final4':
+            # Moderate boost for underdogs
+            # Specifically adjust predictions based on seed difference
+            if seed_diff > 0 and calibrated_preds[i] < 0.4:
+                calibrated_preds[i] *= 1.3
+            elif seed_diff < 0 and calibrated_preds[i] > 0.6:
+                calibrated_preds[i] *= 0.7
     
-    # Add some additional confidence boosting
-    for i in range(len(calibrated_preds)):
-        current_pred = calibrated_preds[i]
-        
-        # Boost near-50/50 predictions
-        if 0.4 < current_pred < 0.6:
-            distance = abs(current_pred - 0.5)
-            boost_factor = distance * 2.0
-            
-            # Boost slightly more for rounds known for upsets
-            if tournament_round is not None:
-                round_name = tournament_round[i]
-                if round_name in ['Round64', 'Sweet16']:
-                    boost_factor *= 1.5
-            
-            # Apply boost
-            if current_pred > 0.5:
-                calibrated_preds[i] = current_pred + (boost_factor * 0.07)
-            else:
-                calibrated_preds[i] = current_pred - (boost_factor * 0.07)
-    
-    # Ensure all predictions are within valid range
-    calibrated_preds = np.clip(calibrated_preds, 0.001, 0.999)
-    
-    return calibrated_preds
+    return np.clip(calibrated_preds, 0.001, 0.999)
 
 def validate_model(model, validation_data, feature_cols, scaler, dropped_features, gender, validation_season):
     """

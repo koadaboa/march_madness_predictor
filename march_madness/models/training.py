@@ -654,70 +654,112 @@ def create_womens_specific_model(random_state=3):
         )
 
 def train_round_specific_models(X_train, y_train, tournament_rounds, gender):
-    """Train specialized models for each tournament round with optimized hyperparameters"""
+    """
+    Train specialized models for each tournament round with advanced optimization techniques
+    
+    Key Improvements:
+    1. More sophisticated model selection for critical rounds
+    2. Enhanced sampling techniques
+    3. Dynamic hyperparameter tuning based on round characteristics
+    4. Detailed logging of model performance
+    """
     round_models = {}
     
-    # Define key rounds that need specialized handling
+    # Define critical rounds with round-specific challenges
     critical_rounds = {
-        "men's": ['Sweet16', 'Elite8', 'Final4', 'Championship'],
-        "women's": ['Final4', 'Championship']
+        "men's": {
+            'Round32': {'accuracy_baseline': 0.625, 'complexity': 'high_variance'},
+            'Sweet16': {'accuracy_baseline': 0.375, 'complexity': 'upset_prone'},
+            'Elite8': {'accuracy_baseline': 0.750, 'complexity': 'moderate'},
+            'Final4': {'accuracy_baseline': 0.500, 'complexity': 'high_stakes'},
+            'Championship': {'accuracy_baseline': 0.500, 'complexity': 'critical'}
+        },
+        "women's": {
+            'Final4': {'accuracy_baseline': 0.333, 'complexity': 'high_variance'},
+            'Championship': {'accuracy_baseline': 0.500, 'complexity': 'critical'}
+        }
     }
     
-    # Get appropriate critical rounds list
-    key_rounds = critical_rounds.get(gender, [])
+    # Get round-specific configurations
+    round_configs = critical_rounds.get(gender, {})
     
     for round_name in tournament_rounds:
         print(f"Training specialized model for {round_name}...")
         
         # Filter training data for this round
         round_mask = X_train['ExpectedRound'] == round_name
-        if sum(round_mask) < 15:  # Need minimum examples
-            print(f"Insufficient data for {round_name}, using general model")
-            continue
-            
         X_round = X_train[round_mask]
         y_round = y_train[round_mask]
         
-        # Add upset balance for critical rounds
-        if round_name in key_rounds:
-            # For critical rounds, use balanced class weights or SMOTE
-            from imblearn.over_sampling import SMOTE
-            if sum(y_round) > 3 and len(y_round) - sum(y_round) > 3:  # Need enough samples of each class
-                sm = SMOTE(random_state=42)
-                X_round, y_round = sm.fit_resample(X_round, y_round)
-                print(f"  Applied SMOTE for {round_name} - now {len(X_round)} samples")
+        # Skip rounds with insufficient data
+        if len(X_round) < 15:
+            print(f"Insufficient data for {round_name}, using general model")
+            continue
         
-        # Create optimized models for each round
-        if round_name == 'Sweet16' and gender == "men's":
-            # Sweet16 has been problematic for men (37.5% accuracy)
-            model = XGBClassifier(
-                n_estimators=500,
-                learning_rate=0.03,
-                max_depth=4,
-                subsample=0.85,
-                colsample_bytree=0.8,
-                scale_pos_weight=2.0,  # Favor upsets more
-                random_state=42
-            )
-        elif round_name == 'Final4' and gender == "women's":
-            # Final4 has been problematic for women (33.3% accuracy)
-            model = LogisticRegression(
-                C=0.7,
-                class_weight='balanced',
-                solver='liblinear',
-                random_state=42
-            )
-        elif round_name in key_rounds:
-            # Other critical rounds get specialized models
-            model = GradientBoostingClassifier(
-                n_estimators=250,
-                learning_rate=0.05,
-                max_depth=4,
-                subsample=0.85,
-                random_state=42
-            )
+        # Advanced sampling for class balance
+        from imblearn.over_sampling import SMOTE
+        from imblearn.under_sampling import RandomUnderSampler
+        from sklearn.model_selection import train_test_split
+        
+        # Combine SMOTE and Undersampling for better class balance
+        if round_name in round_configs:
+            # More aggressive sampling for challenging rounds
+            if len(y_round) > 10 and sum(y_round) > 3 and len(y_round) - sum(y_round) > 3:
+                # Stratified split to maintain round-specific data distribution
+                X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(
+                    X_round, y_round, stratify=y_round, test_size=0.2, random_state=42
+                )
+                
+                # Combined sampling strategy
+                smote = SMOTE(sampling_strategy=0.8, random_state=42)
+                under = RandomUnderSampler(sampling_strategy=0.9, random_state=42)
+                
+                X_resampled, y_resampled = smote.fit_resample(X_train_split, y_train_split)
+                X_resampled, y_resampled = under.fit_resample(X_resampled, y_resampled)
+                
+                print(f"  Applied advanced sampling for {round_name} - now {len(X_resampled)} samples")
+            else:
+                X_resampled, y_resampled = X_round, y_round
         else:
-            # Default round-specific model
+            X_resampled, y_resampled = X_round, y_round
+        
+        # Dynamic model selection based on round complexity
+        if round_name in round_configs:
+            config = round_configs[round_name]
+            
+            if gender == "men's" and round_name == 'Sweet16':
+                # Specialized XGBoost for upset-prone rounds
+                model = XGBClassifier(
+                    n_estimators=500,
+                    learning_rate=0.02,
+                    max_depth=5,
+                    subsample=0.85,
+                    colsample_bytree=0.8,
+                    scale_pos_weight=2.5 if config['complexity'] == 'upset_prone' else 1.5,
+                    gamma=0.3,  # More conservative tree growth
+                    min_child_weight=3,
+                    random_state=42
+                )
+            elif round_name in ['Final4', 'Championship']:
+                # More conservative models for high-stakes rounds
+                model = GradientBoostingClassifier(
+                    n_estimators=300,
+                    learning_rate=0.05,
+                    max_depth=4,
+                    subsample=0.9,  # Higher subsample for stability
+                    random_state=42
+                )
+            else:
+                # Default: Advanced Random Forest
+                model = RandomForestClassifier(
+                    n_estimators=400,
+                    max_depth=6,
+                    min_samples_split=5,
+                    class_weight='balanced_subsample',
+                    random_state=42
+                )
+        else:
+            # Fallback to standard Random Forest
             model = RandomForestClassifier(
                 n_estimators=300,
                 max_depth=6,
@@ -725,16 +767,25 @@ def train_round_specific_models(X_train, y_train, tournament_rounds, gender):
                 class_weight='balanced',
                 random_state=42
             )
-            
-        # Train and store model
-        model.fit(X_round, y_round)
+        
+        # Train the model
+        model.fit(X_resampled, y_resampled)
         round_models[round_name] = model
         
-        # Evaluate on training data
-        train_preds = model.predict(X_round)
-        train_accuracy = accuracy_score(y_round, train_preds)
-        print(f"  {round_name} model training accuracy: {train_accuracy:.4f}")
+        # Comprehensive model evaluation
+        from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+        train_preds = model.predict(X_resampled)
         
+        # Extended performance metrics
+        accuracy = accuracy_score(y_resampled, train_preds)
+        precision, recall, f1, _ = precision_recall_fscore_support(y_resampled, train_preds, average='binary')
+        
+        print(f"  {round_name} model performance:")
+        print(f"    Training Accuracy: {accuracy:.4f}")
+        print(f"    Precision: {precision:.4f}")
+        print(f"    Recall: {recall:.4f}")
+        print(f"    F1 Score: {f1:.4f}")
+    
     return round_models
 
 def accuracy_maximizing_push(predictions, threshold=0.5):

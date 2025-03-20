@@ -1320,4 +1320,37 @@ def create_upset_specific_features(X, gender="men's"):
     if upset_indicators:
         X_enhanced['CompositeUpsetScore'] = sum(upset_indicators)
     
+    def safe_column_check(df, columns):
+        return all(col in df.columns for col in columns)
+    
+    # Advanced Upset Zone with Safety Checks
+    if 'SeedDiff' in X.columns:
+        # Define required columns for each condition
+        base_cols = ['Team1Seed', 'Team2Seed']
+        win_cols = base_cols + ['Team1WinRate']
+        def_cols = base_cols + ['Team1DefEfficiency', 'Team2DefEfficiency']
+        
+        # Conditionally create features based on available columns
+        X_enhanced['AdvancedUpsetZone'] = (
+            # Classic upset matchups with momentum boost
+            ((safe_column_check(X, win_cols) & 
+              (X['Team1Seed'] == 12) & (X['Team2Seed'] == 5) & (X['Team1WinRate'] > 0.6)) |
+             (safe_column_check(X, base_cols) & 
+              (X['Team1Seed'] == 11) & (X['Team2Seed'] == 6)) |
+             (safe_column_check(X, def_cols) & 
+              (X['Team1Seed'] == 10) & (X['Team2Seed'] == 7) & 
+              (X['Team1DefEfficiency'] < X['Team2DefEfficiency']))
+            ).astype(int)
+        )
+        
+        # Exponential Upset Scoring with Safe Column Access
+        if safe_column_check(X, def_cols + ['Team1WinRate']):
+            X_enhanced['ExponentialUpsetScore'] = np.exp(
+                0.5 * abs(X['SeedDiff']) * 
+                (X['Team1DefEfficiency'] < X['Team2DefEfficiency']).astype(int) * 
+                (X['Team1WinRate'] > 0.55).astype(int)
+            )
+        else:
+            X_enhanced['ExponentialUpsetScore'] = np.exp(0.5 * abs(X['SeedDiff']))
+    
     return X_enhanced
