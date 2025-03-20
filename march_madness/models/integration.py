@@ -18,6 +18,47 @@ from ..utils.data_access import get_data_with_index
 # Set up logging
 logger = logging.getLogger(__name__)
 
+def load_tournament_data_direct(data_dir, gender="men's", seasons=None):
+    """
+    Load tournament data directly from CSV files instead of relying on cached data
+    
+    Args:
+        data_dir: Directory containing data files
+        gender: 'men's' or 'women's'
+        seasons: List of seasons to filter (optional)
+        
+    Returns:
+        DataFrame with tournament data
+    """
+    import pandas as pd
+    import os
+    
+    # Define file path based on gender
+    if gender == "men's":
+        file_path = os.path.join(data_dir, 'MNCAATourneyDetailedResults.csv')
+    else:
+        file_path = os.path.join(data_dir, 'WNCAATourneyDetailedResults.csv')
+    
+    # Check if file exists
+    if not os.path.exists(file_path):
+        logger.error(f"Tournament data file not found: {file_path}")
+        return pd.DataFrame()
+    
+    # Load data
+    try:
+        df = pd.read_csv(file_path)
+        logger.info(f"Loaded {len(df)} tournament games from {file_path}")
+        
+        # Filter by seasons if provided
+        if seasons:
+            df = df[df['Season'].isin(seasons)]
+            logger.info(f"Filtered to {len(df)} games for seasons {seasons}")
+        
+        return df
+    except Exception as e:
+        logger.error(f"Error loading tournament data: {str(e)}")
+        return pd.DataFrame()
+
 def train_enhanced_model(X_train, y_train, gender="men's", random_state=42):
     """
     Train an enhanced model with round-specific components for better performance
@@ -339,17 +380,33 @@ def enhance_existing_models(mens_model, mens_metadata,
     # Process men's model
     print("\n===== Enhancing men's tournament model =====")
     
-    # Debug: Check which seasons are available in season_matchups
+    # Check which seasons are available in season_matchups
     seasons_avail = list(mens_data.get('season_matchups', {}).keys())
     print(f"Available seasons in men's season_matchups: {sorted(seasons_avail)}")
-    
+
     # Get all seasons up to 2022 (training + validation)
     train_seasons = [s for s in seasons_avail if s <= 2022]
     print(f"Using training seasons: {sorted(train_seasons)}")
-    
-    # Get tournament data
-    tourney_data = mens_data.get('tourney_data', pd.DataFrame())
-    train_tourney = tourney_data[tourney_data['Season'].isin(train_seasons)]
+
+    # Try to get tournament data from the cache first
+    tourney_data = mens_data.get('tourney_data', None)
+
+    # If not in cache, load directly from file
+    if tourney_data is None or len(tourney_data) == 0:
+        print("Tournament data not found in cache, loading from file...")
+        # Use the correct project path
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(output_dir)))
+        mens_tourney_file = os.path.join(project_root, 'data', 'MNCAATourneyDetailedResults.csv')
+        
+        if os.path.exists(mens_tourney_file):
+            tourney_data = pd.read_csv(mens_tourney_file)
+            print(f"Loaded {len(tourney_data)} men's tournament games from file")
+        else:
+            print(f"ERROR: Tournament file not found at {mens_tourney_file}")
+            tourney_data = pd.DataFrame()
+
+    # Filter for training seasons
+    train_tourney = tourney_data[tourney_data['Season'].isin(train_seasons)] if not tourney_data.empty else pd.DataFrame()
     print(f"Found {len(train_tourney)} men's tournament games for training seasons")
     
     # Create train data for men's model using 2015-2022 data
@@ -465,18 +522,34 @@ def enhance_existing_models(mens_model, mens_metadata,
     
     # Process women's model (similar to men's)
     print("\n===== Enhancing women's tournament model =====")
-    
+
     # Check which seasons are available in season_matchups
     w_seasons_avail = list(womens_data.get('season_matchups', {}).keys())
     print(f"Available seasons in women's season_matchups: {sorted(w_seasons_avail)}")
-    
+
     # Get all seasons up to 2022 (training + validation)
     w_train_seasons = [s for s in w_seasons_avail if s <= 2022]
     print(f"Using training seasons: {sorted(w_train_seasons)}")
-    
-    # Get tournament data
-    w_tourney_data = womens_data.get('tourney_data', pd.DataFrame())
-    w_train_tourney = w_tourney_data[w_tourney_data['Season'].isin(w_train_seasons)]
+
+    # Try to get tournament data from the cache first
+    w_tourney_data = womens_data.get('tourney_data', None)
+
+    # If not in cache, load directly from file
+    if w_tourney_data is None or len(w_tourney_data) == 0:
+        print("Women's tournament data not found in cache, loading from file...")
+        # Use the correct project path
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(output_dir)))
+        womens_tourney_file = os.path.join(project_root, 'data', 'WNCAATourneyDetailedResults.csv')
+        
+        if os.path.exists(womens_tourney_file):
+            w_tourney_data = pd.read_csv(womens_tourney_file)
+            print(f"Loaded {len(w_tourney_data)} women's tournament games from file")
+        else:
+            print(f"ERROR: Women's tournament file not found at {womens_tourney_file}")
+            w_tourney_data = pd.DataFrame()
+
+    # Filter for training seasons
+    w_train_tourney = w_tourney_data[w_tourney_data['Season'].isin(w_train_seasons)] if not w_tourney_data.empty else pd.DataFrame()
     print(f"Found {len(w_train_tourney)} women's tournament games for training seasons")
     
     # Create train data for women's model using 2015-2022 data
